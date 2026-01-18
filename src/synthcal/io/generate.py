@@ -171,7 +171,7 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
             T_world_cam = T_base_tcp @ T_tcp_cam
             T_cam_target = invert_se3(T_world_cam) @ T_world_target
 
-            img = render_chessboard_image(cam, target, T_cam_target)
+            img = render_chessboard_image(cam, target, T_cam_target, supersample=2)
             rng_target = derive_rng(cfg.seed, frame_index, cam_cfg.name, "target")
             img = apply_effects(img, cfg.effects, rng_target)
             Image.fromarray(img, mode="L").save(frame_dir / f"{cam_cfg.name}_target.png")
