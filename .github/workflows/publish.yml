@@ -29,7 +29,7 @@ jobs:
           import tomllib
 
           tag = os.environ.get("GITHUB_REF_NAME", "")
-          data = tomllib.loads(pathlib.Path("pyproject.toml").read_bytes())
+          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
           version = data["project"]["version"]
           expected = f"v{version}"
           if tag != expected:
