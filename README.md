@@ -8,9 +8,9 @@ This repository focuses on:
 - Generating datasets of **static robot poses** for an **eye-in-hand multi-camera rig**.
 - For each frame and camera, producing paired outputs from the **same pose**:
   1) `target.png`: chessboard under normal illumination
-  2) `stripe.png`: black background with only a laser stripe
+  2) `stripe.png`: black background with only a laser stripe (when laser is enabled)
   3) `corners_px.npy` (`float32`, `N x 2`) + `corners_visible.npy` (`bool`, `N`)
-  4) `stripe_centerline_px.npy` (`float32`, `M x 2`)
+  4) `stripe_centerline_px.npy` (`float32`, `M x 2`) + `stripe_centerline_visible.npy` (`bool`, `M`)
 
 **Units:** millimeters (mm) everywhere for geometry. Pixel coordinates are in pixels.
 
@@ -38,9 +38,8 @@ The `generate` subcommand currently writes:
 - `manifest.yaml` (stable schema v1)
 - per-frame `T_base_tcp.npy` (currently identity for all frames, v0)
 - per-frame/per-camera `*_target.png` + `*_corners_*.npy`
+- when laser is enabled: per-frame/per-camera `*_stripe.png` + `*_stripe_centerline_*.npy`
 - placeholder rig/camera YAML files (`rig/`)
-
-Laser/stripe rendering is not implemented yet.
 
 ## CLI
 
@@ -68,6 +67,10 @@ The dataset layout is described in `manifest.yaml`. The v1 layout patterns inclu
 - `frames/frame_{frame_index:06d}/{camera_name}_target.png`
 - `frames/frame_{frame_index:06d}/{camera_name}_corners_px.npy`
 - `frames/frame_{frame_index:06d}/{camera_name}_corners_visible.npy`
+- when laser is enabled:
+  - `frames/frame_{frame_index:06d}/{camera_name}_stripe.png`
+  - `frames/frame_{frame_index:06d}/{camera_name}_stripe_centerline_px.npy`
+  - `frames/frame_{frame_index:06d}/{camera_name}_stripe_centerline_visible.npy`
 
 Additional files created per frame (not currently described by the manifest):
 - `frames/frame_{frame_index:06d}/T_base_tcp.npy`

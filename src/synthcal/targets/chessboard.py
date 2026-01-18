@@ -91,4 +91,3 @@ class ChessboardTarget:
         is_black = ((ix + iy) & 1) == 0
         black, white = self.colors
         return np.where(is_black, black, white).astype(np.uint8, copy=False)
-
