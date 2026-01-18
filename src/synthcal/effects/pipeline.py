@@ -6,16 +6,65 @@ The pipeline is deterministic given an explicit RNG:
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
 
 from synthcal.effects.config import EffectsConfig
 
-try:  # pragma: no cover (scipy is a required dependency in this repo)
-    from scipy.ndimage import gaussian_filter
-except Exception as exc:  # pragma: no cover
-    raise ImportError("scipy is required for gaussian blur effects") from exc
+try:
+    from scipy.ndimage import gaussian_filter as _gaussian_filter  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover
+    _gaussian_filter = None
+
+
+def _gaussian_kernel1d(sigma: float, *, truncate: float = 3.0) -> np.ndarray:
+    radius = int(math.ceil(float(truncate) * float(sigma)))
+    if radius <= 0:
+        return np.array([1.0], dtype=np.float32)
+    x = np.arange(-radius, radius + 1, dtype=np.float32)
+    k = np.exp(-0.5 * (x / float(sigma)) ** 2)
+    k = k / float(np.sum(k))
+    return k.astype(np.float32, copy=False)
+
+
+def _convolve1d_nearest(img: np.ndarray, kernel: np.ndarray, *, axis: int) -> np.ndarray:
+    if img.ndim != 2:
+        raise ValueError("img must be 2D")
+    if kernel.ndim != 1:
+        raise ValueError("kernel must be 1D")
+    radius = int((kernel.shape[0] - 1) // 2)
+    if radius <= 0:
+        return img.astype(np.float32, copy=False)
+
+    img_f = img.astype(np.float32, copy=False)
+    if axis == 0:
+        padded = np.pad(img_f, ((radius, radius), (0, 0)), mode="edge")
+        out = np.empty_like(img_f, dtype=np.float32)
+        for r in range(img_f.shape[0]):
+            window = padded[r : r + 2 * radius + 1, :]
+            out[r, :] = kernel @ window
+        return out
+    if axis == 1:
+        padded = np.pad(img_f, ((0, 0), (radius, radius)), mode="edge")
+        out = np.empty_like(img_f, dtype=np.float32)
+        for c in range(img_f.shape[1]):
+            window = padded[:, c : c + 2 * radius + 1]
+            out[:, c] = window @ kernel
+        return out
+    raise ValueError("axis must be 0 or 1")
+
+
+def _gaussian_blur(img: np.ndarray, *, sigma: float) -> np.ndarray:
+    if _gaussian_filter is not None:
+        return _gaussian_filter(img, sigma=float(sigma), mode="nearest").astype(
+            np.float32, copy=False
+        )
+    k = _gaussian_kernel1d(float(sigma))
+    out = _convolve1d_nearest(img, k, axis=1)
+    out = _convolve1d_nearest(out, k, axis=0)
+    return out.astype(np.float32, copy=False)
 
 
 def apply_effects(
@@ -64,9 +113,7 @@ def apply_effects(
     out = img.astype(np.float32, copy=False)
 
     if blur_sigma_px > 0.0:
-        out = gaussian_filter(out, sigma=blur_sigma_px, mode="nearest").astype(
-            np.float32, copy=False
-        )
+        out = _gaussian_blur(out, sigma=blur_sigma_px)
 
     if noise_sigma > 0.0:
         if rng is None:

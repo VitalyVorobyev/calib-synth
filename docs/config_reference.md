@@ -1,0 +1,47 @@
+# Config reference (v1)
+
+Top-level keys:
+
+- `config_version` (int): config schema version. Supported: `1`.
+- `seed` (int): global dataset seed (determinism key).
+- `units` (object): must be `{length: "mm"}`.
+- `dataset` (object):
+  - `name` (str)
+  - `num_frames` (int): number of frames to generate (may be overridden by `scenario.num_frames`).
+- `rig` (object):
+  - `cameras` (list of objects):
+    - `name` (str, ASCII): used in output filenames (e.g. `cam00`).
+    - `image_size_px` (`[W, H]` ints)
+    - `K` (3x3 floats): OpenCV-style intrinsics
+    - `dist` (5 floats): `[k1, k2, k3, p1, p2]`
+    - `T_tcp_cam` (4x4 floats, optional): TCP→camera extrinsic, defaults to identity.
+- `chessboard` (object):
+  - `inner_corners` (`[cols, rows]` ints, both >= 2)
+  - `square_size_mm` (float > 0)
+- `effects` (object, optional):
+  - `enabled` (bool, default `true`)
+  - `blur_sigma_px` (float >= 0, default `0.0`)
+  - `noise_sigma` (float >= 0, default `0.0`)
+  - `clamp_min` (float, default `0.0`)
+  - `clamp_max` (float, default `255.0`)
+  - Note: blur uses SciPy when available (`pip install "synthcal[scipy]"`); otherwise a deterministic NumPy fallback is used.
+- `laser` (object, optional):
+  - `enabled` (bool, default `false`)
+  - `plane_in_tcp` (`[nx, ny, nz, d]` floats): plane equation `n·X + d = 0` in TCP frame (X in mm)
+  - `stripe_width_px` (int > 0, default `3`)
+  - `stripe_intensity` (int in `[1..255]` when enabled, default `255`)
+- `scenario` (object, optional): enables per-frame pose sampling and in-view constraints
+  - `preset` (`"easy" | "medium" | "hard"`, optional)
+  - `num_frames` (int > 0, optional)
+  - `distance_mm` (object `{min,max}`; `min > 0`)
+  - `tilt_deg` (object `{min,max}`; `0 <= min <= max <= 89`)
+  - `yaw_deg` (object `{min,max}`)
+  - `roll_deg` (object `{min,max}`)
+  - `xy_offset_frac` (object `{min,max}`): fractions of board width/height for the look-at point offset
+  - `in_view` (object):
+    - `margin_px` (int >= 0, default `20`)
+    - `require_all_cameras` (bool, default `true`)
+    - `min_cameras_visible` (int > 0, default `1`)
+  - `max_attempts_per_frame` (int > 0, default depends on preset)
+- `scene` (object, optional):
+  - `T_world_target` (4x4 floats): world/base → target pose (mm)

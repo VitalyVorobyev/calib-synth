@@ -27,6 +27,19 @@ def test_effects_blur_spreads_impulse() -> None:
     assert int(out.max()) < 255
 
 
+def test_effects_blur_numpy_fallback(monkeypatch: object) -> None:
+    import synthcal.effects.pipeline as pipeline
+
+    monkeypatch.setattr(pipeline, "_gaussian_filter", None)
+
+    img = np.zeros((21, 21), dtype=np.uint8)
+    img[10, 10] = 255
+
+    cfg = EffectsConfig(enabled=True, blur_sigma_px=1.0, noise_sigma=0.0)
+    out = pipeline.apply_effects(img, cfg, rng=None)
+    assert int(np.count_nonzero(out)) > 1
+
+
 def test_effects_noise_is_deterministic_per_modality() -> None:
     img = np.full((32, 32), 128, dtype=np.uint8)
     cfg = EffectsConfig(enabled=True, blur_sigma_px=0.0, noise_sigma=10.0)

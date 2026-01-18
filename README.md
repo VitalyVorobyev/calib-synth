@@ -2,7 +2,37 @@
 
 Synthetic dataset generator for **camera + laser-stripe calibration**.
 
-## Scope (v0)
+## Install
+
+```bash
+pip install synthcal
+# Optional (recommended for faster Gaussian blur):
+pip install "synthcal[scipy]"
+```
+
+## Quickstart
+
+Initialize an example config:
+
+```bash
+synthcal init-config config.yaml
+```
+
+Preview one frame/camera:
+
+```bash
+synthcal preview config.yaml --frame 0 --cam cam00
+```
+
+Generate a dataset:
+
+```bash
+synthcal generate config.yaml out_dataset/
+```
+
+`python -m synthcal ...` is also supported.
+
+## Scope
 
 This repository focuses on:
 - Generating datasets of **static robot poses** for an **eye-in-hand multi-camera rig**.
@@ -15,6 +45,10 @@ This repository focuses on:
 **Units:** millimeters (mm) everywhere for geometry. Pixel coordinates are in pixels.
 
 **Camera model:** OpenCV-style intrinsics `K` + distortion `dist = (k1, k2, k3, p1, p2)` (no OpenCV dependency).
+
+## Examples
+
+See `examples/minimal_no_laser.yaml`, `examples/minimal_with_laser.yaml`, and `examples/multicam_medium.yaml`.
 
 ## Camera model
 
@@ -31,11 +65,11 @@ yd = y*radial + y_tan
 
 Undistortion is implemented as a simple fixed-point iteration starting from `(xu, yu) = (xd, yd)` and repeatedly subtracting the forward-model error until convergence (works well for small/moderate distortion and points near the principal point).
 
-## Current state
+## Outputs
 
-The `generate` subcommand currently writes:
+The dataset layout is described in `manifest.yaml` (schema v1). Outputs include:
 - `config.yaml` (the normalized config used to generate)
-- `manifest.yaml` (stable schema v1)
+- `manifest.yaml` (stable schema v1; also includes `version: 1`)
 - per-frame `T_base_tcp.npy` (identity for all frames unless `scenario` pose sampling is enabled)
 - per-frame/per-camera `*_target.png` + `*_corners_*.npy`
 - when laser is enabled: per-frame/per-camera `*_stripe.png` + `*_stripe_centerline_*.npy`
@@ -48,6 +82,8 @@ Rendered images can be post-processed to add simple realism:
 - `noise_sigma`: zero-mean Gaussian read noise sigma in **intensity units** (0..255)
 
 Order of operations: blur → noise → clamp → quantize to uint8.
+Blur uses SciPy (`scipy.ndimage.gaussian_filter`) when available; otherwise synthcal falls back to a
+deterministic NumPy implementation (slower).
 
 Determinism: noise is seeded from the global dataset seed and a stable per-output key
 `(frame_index, camera_name, modality)` so re-generating with the same config+seed produces identical
@@ -59,42 +95,53 @@ Optional `scenario` pose sampling can generate a different `T_base_tcp` per fram
 in-view constraints (all corners inside the image with a margin). Presets `easy|medium|hard` provide
 reasonable default ranges; all randomness is derived from the global seed.
 
+## Laser
+
+Laser output is optional. When enabled, synthcal models the laser as a single infinite plane in the
+TCP frame: `n·X + d = 0` (X in mm). The stripe is rendered only where the laser plane intersects the
+target plane (`Z=0` in target frame). If the planes are nearly parallel, synthcal outputs a black
+stripe image and empty centerline arrays for that (frame, camera).
+
+## Reproducibility
+
+- `seed` is the single global seed recorded in `config.yaml` and `manifest.yaml`.
+- Noise/effects use deterministic per-output RNG streams derived from `(seed, frame_index, camera_name, modality)`.
+- Scenario pose sampling uses a deterministic per-frame stream derived from `(seed, frame_index, "__scenario__", "pose")`.
+
+## Public API
+
+Supported library entry points live in `src/synthcal/api.py`:
+
+```python
+from synthcal import generate_dataset, render_frame_preview
+```
+
 ## CLI
 
-Initialize an example config:
+The CLI provides:
+- `synthcal init-config`
+- `synthcal preview`
+- `synthcal generate`
 
-```bash
-python -m synthcal init-config config.yaml
-```
-
-Create an output directory with manifest + placeholders:
-
-```bash
-python -m synthcal generate config.yaml out_dataset/
-```
-
-Preview one frame/camera with a matplotlib overlay:
-
-```bash
-python -m synthcal preview config.yaml --frame 0 --cam cam00
-```
-
-## Output format (planned)
-
-The dataset layout is described in `manifest.yaml`. The v1 layout patterns include:
-- `frames/frame_{frame_index:06d}/{camera_name}_target.png`
-- `frames/frame_{frame_index:06d}/{camera_name}_corners_px.npy`
-- `frames/frame_{frame_index:06d}/{camera_name}_corners_visible.npy`
-- when laser is enabled:
-  - `frames/frame_{frame_index:06d}/{camera_name}_stripe.png`
-  - `frames/frame_{frame_index:06d}/{camera_name}_stripe_centerline_px.npy`
-  - `frames/frame_{frame_index:06d}/{camera_name}_stripe_centerline_visible.npy`
-
-Additional files created per frame (not currently described by the manifest):
-- `frames/frame_{frame_index:06d}/T_base_tcp.npy`
+Preview options:
+- `--no-effects`: show the raw render (before blur/noise/quantize)
+- `--all-cams`: show a grid for all cameras
+- `--show-stripe`: with `--all-cams`, also show a stripe grid when laser is enabled
 
 ## Coordinate conventions
 
+- Frames (v0): `world == base` (eye-in-hand only).
+- `T_tcp_cam` maps TCP-frame points into the camera frame.
 - `T_cam_target` maps target-frame points into the camera frame: `X_cam = T_cam_target @ [X_target, 1]`.
 - The chessboard target lies in plane `Z=0` in the target frame, with outer corner at `(0,0,0)`.
 - Inner corners are ordered row-major (rows first, then cols), matching OpenCV’s convention.
+
+## Docs
+
+- `docs/config_reference.md`
+- `docs/manifest_reference.md`
+
+## Extending synthcal
+
+Targets, sensors, sampling, and effects are implemented in `src/synthcal/`. Only the functions in
+`src/synthcal/api.py` are intended to be stable for external users.

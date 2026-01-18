@@ -287,7 +287,10 @@ class SynthCalManifest:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SynthCalManifest:
         data = _require_mapping(data, label="manifest")
-        version = _require_int(data.get("manifest_version"), label="manifest_version")
+        version_raw = data.get("manifest_version", None)
+        if version_raw is None:
+            version_raw = data.get("version", None)
+        version = _require_int(version_raw, label="manifest_version")
         if version != 1:
             raise ManifestError(f"Unsupported manifest_version {version}; expected 1")
 
@@ -322,6 +325,7 @@ class SynthCalManifest:
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
+            "version": self.manifest_version,
             "manifest_version": self.manifest_version,
             "created_utc": self.created_utc,
             "generator": self.generator.to_dict(),

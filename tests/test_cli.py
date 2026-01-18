@@ -25,7 +25,7 @@ def test_init_config_writes_loadable_yaml(tmp_path: Path) -> None:
     _run_module(["init-config", str(config_path)])
 
     cfg = load_config(config_path)
-    assert cfg.version == 1
+    assert cfg.config_version == 1
     assert isinstance(cfg.seed, int)
     assert cfg.rig.cameras
 
