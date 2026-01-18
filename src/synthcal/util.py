@@ -24,4 +24,3 @@ def require_ascii_filename_component(value: str, *, label: str) -> str:
             f"{label} must match {_ASCII_FILENAME_COMPONENT_RE.pattern} (got {value!r})"
         )
     return value
-

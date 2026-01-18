@@ -3,13 +3,10 @@
 This module currently supports generating:
 - a rendered chessboard image per frame/camera
 - ground-truth inner corner projections + visibility mask per frame/camera
-
-Laser/stripe rendering is intentionally not implemented yet.
 """
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -23,14 +20,22 @@ from synthcal.io.config import SynthCalConfig, save_config
 from synthcal.io.manifest import (
     ManifestCamera,
     ManifestGenerator,
+    ManifestLaser,
     ManifestLayout,
     ManifestPaths,
     SynthCalManifest,
     save_manifest,
     utc_now_iso8601,
 )
+from synthcal.laser import (
+    intersect_planes_to_line,
+    normalize_plane,
+    sample_line_points,
+    transform_plane,
+)
 from synthcal.render.chessboard import render_chessboard_image
 from synthcal.render.gt import project_corners_px
+from synthcal.render.stripe import render_stripe_image
 from synthcal.targets.chessboard import ChessboardTarget
 
 
@@ -103,19 +108,15 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if cfg.laser is not None and cfg.laser.enabled:
-        print(
-            "note: laser enabled but stripe rendering not implemented yet (will be added in next milestone)",
-            file=sys.stderr,
-        )
-
     # Persist the normalized config used for generation.
     save_config(cfg, out_dir / "config.yaml")
     _write_rig_files(cfg, out_dir)
 
     # Build camera/target models.
     cols, rows = cfg.chessboard.inner_corners
-    target = ChessboardTarget(inner_rows=rows, inner_cols=cols, square_size_mm=cfg.chessboard.square_size_mm)
+    target = ChessboardTarget(
+        inner_rows=rows, inner_cols=cols, square_size_mm=cfg.chessboard.square_size_mm
+    )
     corners_xyz = target.corners_xyz()
 
     if cfg.scene is not None:
@@ -128,6 +129,10 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
 
     # For v0, use a single static TCP pose for all frames (identity).
     T_base_tcp = np.eye(4, dtype=np.float64)
+    laser_plane_tcp = None
+    if cfg.laser is not None and cfg.laser.enabled:
+        laser_plane_tcp = normalize_plane(np.asarray(cfg.laser.plane_in_tcp, dtype=np.float64))
+    board_plane_target = np.array([0.0, 0.0, 1.0, 0.0], dtype=np.float64)
 
     for frame_index in range(cfg.dataset.num_frames):
         frame_dir = frames_dir / f"frame_{frame_index:06d}"
@@ -149,10 +154,55 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
             Image.fromarray(img, mode="L").save(frame_dir / f"{cam_cfg.name}_target.png")
 
             corners_px, visible = project_corners_px(cam, corners_xyz, T_cam_target)
-            np.save(frame_dir / f"{cam_cfg.name}_corners_px.npy", corners_px.astype(np.float32, copy=False))
-            np.save(frame_dir / f"{cam_cfg.name}_corners_visible.npy", visible.astype(bool, copy=False))
+            np.save(
+                frame_dir / f"{cam_cfg.name}_corners_px.npy",
+                corners_px.astype(np.float32, copy=False),
+            )
+            np.save(
+                frame_dir / f"{cam_cfg.name}_corners_visible.npy", visible.astype(bool, copy=False)
+            )
+
+            if laser_plane_tcp is not None:
+                T_cam_tcp = invert_se3(T_tcp_cam)
+                plane_cam = transform_plane(T_cam_tcp, laser_plane_tcp)
+                T_target_cam = invert_se3(T_cam_target)
+                plane_target = transform_plane(T_target_cam, plane_cam)
+
+                stripe_px: np.ndarray
+                stripe_vis: np.ndarray
+                try:
+                    p0, v = intersect_planes_to_line(plane_target, board_plane_target, eps=1e-12)
+                except ValueError:
+                    stripe_px = np.zeros((0, 2), dtype=np.float32)
+                    stripe_vis = np.zeros((0,), dtype=bool)
+                    stripe_img = np.zeros((cam.resolution[1], cam.resolution[0]), dtype=np.uint8)
+                else:
+                    width_mm, height_mm = target.bounds()
+                    L = float(max(width_mm, height_mm) * 4.0)
+                    num = int(max(cam.resolution) * 2)
+                    pts_target = sample_line_points(p0, v, -L, L, num)
+                    stripe_px, stripe_vis = project_corners_px(cam, pts_target, T_cam_target)
+                    stripe_img = render_stripe_image(
+                        cam,
+                        stripe_px,
+                        stripe_vis,
+                        width_px=float(cfg.laser.stripe_width_px),
+                        intensity=int(cfg.laser.stripe_intensity),
+                        background=0,
+                    )
+
+                Image.fromarray(stripe_img, mode="L").save(frame_dir / f"{cam_cfg.name}_stripe.png")
+                np.save(
+                    frame_dir / f"{cam_cfg.name}_stripe_centerline_px.npy",
+                    stripe_px.astype(np.float32, copy=False),
+                )
+                np.save(
+                    frame_dir / f"{cam_cfg.name}_stripe_centerline_visible.npy",
+                    stripe_vis.astype(bool, copy=False),
+                )
 
     # Write a v1 manifest that lists only outputs produced in v0.
+    include_laser = cfg.laser is not None and cfg.laser.enabled
     manifest = SynthCalManifest(
         manifest_version=1,
         created_utc=utc_now_iso8601(),
@@ -160,7 +210,16 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
         seed=cfg.seed,
         units={"length": "mm"},
         dataset={"name": cfg.dataset.name, "num_frames": cfg.dataset.num_frames},
-        laser=None,
+        laser=(
+            None
+            if not include_laser
+            else ManifestLaser(
+                enabled=True,
+                plane_in_tcp=tuple(float(v) for v in cfg.laser.plane_in_tcp),
+                stripe_width_px=int(cfg.laser.stripe_width_px),
+                stripe_intensity=int(cfg.laser.stripe_intensity),
+            )
+        ),
         paths=ManifestPaths(
             config_yaml="config.yaml",
             manifest_yaml="manifest.yaml",
@@ -176,6 +235,6 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
             )
             for c in cfg.rig.cameras
         ),
-        layout=ManifestLayout.v1_default(include_laser=False),
+        layout=ManifestLayout.v1_default(include_laser=include_laser),
     )
     save_manifest(manifest, out_dir / "manifest.yaml")

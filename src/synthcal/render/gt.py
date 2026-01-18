@@ -55,4 +55,3 @@ def project_corners_px(
     in_bounds = (u >= 0.0) & (u < float(W)) & (v >= 0.0) & (v < float(H))
     visible = ok & finite & in_bounds
     return corners_px, visible.astype(bool, copy=False)
-

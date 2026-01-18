@@ -64,7 +64,9 @@ class PinholeCamera:
         object.__setattr__(self, "K", K)
         object.__setattr__(self, "dist", dist)
 
-    def pixel_to_normalized(self, u_px: float | np.ndarray, v_px: float | np.ndarray) -> tuple[Any, Any]:
+    def pixel_to_normalized(
+        self, u_px: float | np.ndarray, v_px: float | np.ndarray
+    ) -> tuple[Any, Any]:
         """Convert pixel coordinates to normalized coordinates using `K^{-1}`."""
 
         u = _as_float64_array(u_px)
@@ -187,4 +189,3 @@ class PinholeCamera:
         xd, yd = self.distort_normalized(x, y)
         u, v = self.normalized_to_pixel(xd, yd)
         return float(u), float(v), False
-

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import yaml
 
@@ -82,7 +83,7 @@ class DatasetConfig:
     num_frames: int
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "DatasetConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> DatasetConfig:
         data = _require_mapping(data, label="dataset")
         name = data.get("name", "dataset")
         if not isinstance(name, str) or not name:
@@ -107,7 +108,7 @@ class ChessboardConfig:
     square_size_mm: float
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ChessboardConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> ChessboardConfig:
         data = _require_mapping(data, label="chessboard")
         inner = _require_seq(data.get("inner_corners"), label="chessboard.inner_corners")
         if len(inner) != 2:
@@ -142,7 +143,7 @@ class CameraConfig:
     T_tcp_cam: tuple[tuple[float, float, float, float], ...]
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "CameraConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> CameraConfig:
         data = _require_mapping(data, label="camera")
         name = require_ascii_filename_component(data.get("name"), label="camera.name")
 
@@ -178,8 +179,10 @@ class CameraConfig:
         )
 
         T_tcp_cam_raw = data.get("T_tcp_cam", None)
-        T_tcp_cam = _mat44_identity() if T_tcp_cam_raw is None else _require_mat44(
-            T_tcp_cam_raw, label=f"camera[{name}].T_tcp_cam"
+        T_tcp_cam = (
+            _mat44_identity()
+            if T_tcp_cam_raw is None
+            else _require_mat44(T_tcp_cam_raw, label=f"camera[{name}].T_tcp_cam")
         )
         return cls(
             name=name,
@@ -207,7 +210,7 @@ class RigConfig:
     cameras: tuple[CameraConfig, ...]
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "RigConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> RigConfig:
         data = _require_mapping(data, label="rig")
         cams_raw = _require_seq(data.get("cameras"), label="rig.cameras")
         cameras = tuple(CameraConfig.from_dict(c) for c in cams_raw)
@@ -229,13 +232,13 @@ class SceneConfig:
     T_world_target: tuple[tuple[float, float, float, float], ...]
 
     @classmethod
-    def from_optional(cls, data: Any) -> "SceneConfig | None":
+    def from_optional(cls, data: Any) -> SceneConfig | None:
         if data is None:
             return None
         return cls.from_dict(data)
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "SceneConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> SceneConfig:
         data = _require_mapping(data, label="scene")
         T_world_target = _require_mat44(data.get("T_world_target"), label="scene.T_world_target")
         return cls(T_world_target=T_world_target)
@@ -257,13 +260,13 @@ class LaserConfig:
     stripe_intensity: int
 
     @classmethod
-    def from_optional(cls, data: Any) -> "LaserConfig | None":
+    def from_optional(cls, data: Any) -> LaserConfig | None:
         if data is None:
             return None
         return cls.from_dict(data)
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "LaserConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> LaserConfig:
         data = _require_mapping(data, label="laser")
         enabled = _require_bool(data.get("enabled", False), label="laser.enabled")
 
@@ -275,7 +278,9 @@ class LaserConfig:
             _require_number(plane_seq[i], label=f"laser.plane_in_tcp[{i}]") for i in range(4)
         )
 
-        stripe_width_px = _require_int(data.get("stripe_width_px", 3), label="laser.stripe_width_px")
+        stripe_width_px = _require_int(
+            data.get("stripe_width_px", 3), label="laser.stripe_width_px"
+        )
         if stripe_width_px <= 0:
             raise ConfigError("laser.stripe_width_px must be > 0")
 
@@ -303,6 +308,7 @@ class LaserConfig:
             "stripe_intensity": self.stripe_intensity,
         }
 
+
 @dataclass(frozen=True)
 class SynthCalConfig:
     """Top-level config file."""
@@ -316,7 +322,7 @@ class SynthCalConfig:
     scene: SceneConfig | None
 
     @classmethod
-    def example(cls) -> "SynthCalConfig":
+    def example(cls) -> SynthCalConfig:
         """Return a small example config with sane defaults."""
 
         # A single camera with reasonable-looking intrinsics for 1280x720.
@@ -362,7 +368,7 @@ class SynthCalConfig:
         )
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "SynthCalConfig":
+    def from_dict(cls, data: Mapping[str, Any]) -> SynthCalConfig:
         data = _require_mapping(data, label="config")
         version = _require_int(data.get("version"), label="version")
         if version != 1:

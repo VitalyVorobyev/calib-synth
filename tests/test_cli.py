@@ -89,8 +89,46 @@ def test_generate_omits_laser_outputs_when_disabled(tmp_path: Path) -> None:
     assert "laser" not in manifest_raw
     assert "stripe_image" not in manifest_raw["layout"]
     assert "stripe_centerline_px_npy" not in manifest_raw["layout"]
+    assert "stripe_centerline_visible_npy" not in manifest_raw["layout"]
 
     manifest = load_manifest(manifest_path)
     assert manifest.laser is None
     assert manifest.layout.stripe_image is None
     assert manifest.layout.stripe_centerline_px_npy is None
+    assert manifest.layout.stripe_centerline_visible_npy is None
+
+
+def test_generate_includes_laser_outputs_when_enabled(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _run_module(["init-config", str(config_path)])
+
+    cfg_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    cfg_data["laser"] = {
+        "enabled": True,
+        "plane_in_tcp": [1.0, 0.0, 0.0, 0.0],
+        "stripe_width_px": 3,
+        "stripe_intensity": 255,
+    }
+    config_path.write_text(
+        yaml.safe_dump(cfg_data, sort_keys=False, indent=2, default_flow_style=False),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(config_path)
+    assert cfg.laser is not None and cfg.laser.enabled
+
+    out_dir = tmp_path / "out"
+    _run_module(["generate", str(config_path), str(out_dir)])
+
+    manifest_path = out_dir / "manifest.yaml"
+    manifest_raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    assert "laser" in manifest_raw
+    assert "stripe_image" in manifest_raw["layout"]
+    assert "stripe_centerline_px_npy" in manifest_raw["layout"]
+    assert "stripe_centerline_visible_npy" in manifest_raw["layout"]
+
+    frame_dir = out_dir / "frames" / "frame_000000"
+    for cam in cfg.rig.cameras:
+        assert (frame_dir / f"{cam.name}_stripe.png").is_file()
+        assert (frame_dir / f"{cam.name}_stripe_centerline_px.npy").is_file()
+        assert (frame_dir / f"{cam.name}_stripe_centerline_visible.npy").is_file()

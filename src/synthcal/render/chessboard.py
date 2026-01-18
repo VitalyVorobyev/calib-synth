@@ -96,4 +96,3 @@ def render_chessboard_image(
     if bool(np.any(mask)):
         out[mask] = target.eval_color_xy(x[mask], y[mask])
     return out.reshape(H, W)
-

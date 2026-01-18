@@ -6,10 +6,11 @@ All paths stored in the manifest are *relative* to the dataset root directory.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import yaml
 
@@ -54,7 +55,7 @@ class ManifestGenerator:
     version: str
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ManifestGenerator":
+    def from_dict(cls, data: Mapping[str, Any]) -> ManifestGenerator:
         data = _require_mapping(data, label="generator")
         name = data.get("name")
         version = data.get("version")
@@ -79,7 +80,7 @@ class ManifestPaths:
     frames_dir: str
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ManifestPaths":
+    def from_dict(cls, data: Mapping[str, Any]) -> ManifestPaths:
         data = _require_mapping(data, label="paths")
         fields = ["config_yaml", "manifest_yaml", "rig_yaml", "cameras_dir", "frames_dir"]
         values: dict[str, str] = {}
@@ -107,7 +108,7 @@ class ManifestCamera:
     image_size_px: tuple[int, int]
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ManifestCamera":
+    def from_dict(cls, data: Mapping[str, Any]) -> ManifestCamera:
         data = _require_mapping(data, label="camera")
         name = data.get("name")
         intrinsics_yaml = data.get("intrinsics_yaml")
@@ -142,17 +143,21 @@ class ManifestLaser:
     stripe_intensity: int
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ManifestLaser":
+    def from_dict(cls, data: Mapping[str, Any]) -> ManifestLaser:
         data = _require_mapping(data, label="laser")
         enabled = _require_bool(data.get("enabled"), label="laser.enabled")
 
         plane_seq = _require_seq(data.get("plane_in_tcp"), label="laser.plane_in_tcp")
         if len(plane_seq) != 4:
             raise ManifestError("laser.plane_in_tcp must have length 4: [a, b, c, d]")
-        plane = tuple(_require_number(plane_seq[i], label=f"laser.plane_in_tcp[{i}]") for i in range(4))
+        plane = tuple(
+            _require_number(plane_seq[i], label=f"laser.plane_in_tcp[{i}]") for i in range(4)
+        )
 
         stripe_width_px = _require_int(data.get("stripe_width_px"), label="laser.stripe_width_px")
-        stripe_intensity = _require_int(data.get("stripe_intensity"), label="laser.stripe_intensity")
+        stripe_intensity = _require_int(
+            data.get("stripe_intensity"), label="laser.stripe_intensity"
+        )
 
         return cls(
             enabled=enabled,
@@ -181,9 +186,10 @@ class ManifestLayout:
     corners_visible_npy: str
     stripe_image: str | None = None
     stripe_centerline_px_npy: str | None = None
+    stripe_centerline_visible_npy: str | None = None
 
     @classmethod
-    def v1_default(cls, *, include_laser: bool = False) -> "ManifestLayout":
+    def v1_default(cls, *, include_laser: bool = False) -> ManifestLayout:
         frame_dir = "frames/frame_{frame_index:06d}"
         camera_dir = "."
         base = frame_dir
@@ -197,10 +203,13 @@ class ManifestLayout:
             stripe_centerline_px_npy=(
                 f"{base}/{{camera_name}}_stripe_centerline_px.npy" if include_laser else None
             ),
+            stripe_centerline_visible_npy=(
+                f"{base}/{{camera_name}}_stripe_centerline_visible.npy" if include_laser else None
+            ),
         )
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ManifestLayout":
+    def from_dict(cls, data: Mapping[str, Any]) -> ManifestLayout:
         data = _require_mapping(data, label="layout")
         required = [
             "frame_dir",
@@ -228,10 +237,19 @@ class ManifestLayout:
                 "layout.stripe_centerline_px_npy must be a non-empty string when present"
             )
 
+        stripe_visible = data.get("stripe_centerline_visible_npy")
+        if stripe_visible is not None and (
+            not isinstance(stripe_visible, str) or not stripe_visible
+        ):
+            raise ManifestError(
+                "layout.stripe_centerline_visible_npy must be a non-empty string when present"
+            )
+
         return cls(
             **values,  # type: ignore[arg-type]
             stripe_image=stripe_image,
             stripe_centerline_px_npy=stripe_centerline,
+            stripe_centerline_visible_npy=stripe_visible,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -246,6 +264,8 @@ class ManifestLayout:
             data["stripe_image"] = self.stripe_image
         if self.stripe_centerline_px_npy is not None:
             data["stripe_centerline_px_npy"] = self.stripe_centerline_px_npy
+        if self.stripe_centerline_visible_npy is not None:
+            data["stripe_centerline_visible_npy"] = self.stripe_centerline_visible_npy
         return data
 
 
@@ -265,7 +285,7 @@ class SynthCalManifest:
     layout: ManifestLayout
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "SynthCalManifest":
+    def from_dict(cls, data: Mapping[str, Any]) -> SynthCalManifest:
         data = _require_mapping(data, label="manifest")
         version = _require_int(data.get("manifest_version"), label="manifest_version")
         if version != 1:
