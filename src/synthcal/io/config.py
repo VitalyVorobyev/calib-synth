@@ -1,7 +1,12 @@
-"""Config schema (v1) and YAML helpers."""
+"""Config schema (v1) and YAML helpers.
+
+The top-level `config_version` is versioned and validated on load. Future releases may provide
+upgrade helpers for older versions.
+"""
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,30 +24,40 @@ class ConfigError(ValueError):
 
 
 def _require_mapping(value: Any, *, label: str) -> Mapping[str, Any]:
+    if value is None:
+        raise ConfigError(f"{label} is required")
     if not isinstance(value, Mapping):
         raise ConfigError(f"{label} must be a mapping/object")
     return value
 
 
 def _require_int(value: Any, *, label: str) -> int:
+    if value is None:
+        raise ConfigError(f"{label} is required")
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"{label} must be an integer")
     return value
 
 
 def _require_number(value: Any, *, label: str) -> float:
+    if value is None:
+        raise ConfigError(f"{label} is required")
     if not isinstance(value, (int, float)):
         raise ConfigError(f"{label} must be a number")
     return float(value)
 
 
 def _require_seq(value: Any, *, label: str) -> Sequence[Any]:
+    if value is None:
+        raise ConfigError(f"{label} is required")
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         raise ConfigError(f"{label} must be a sequence/list")
     return value
 
 
 def _require_bool(value: Any, *, label: str) -> bool:
+    if value is None:
+        raise ConfigError(f"{label} is required")
     if not isinstance(value, bool):
         raise ConfigError(f"{label} must be a bool")
     return value
@@ -117,8 +132,8 @@ class ChessboardConfig:
             raise ConfigError("chessboard.inner_corners must have length 2: [cols, rows]")
         cols = _require_int(inner[0], label="chessboard.inner_corners[0]")
         rows = _require_int(inner[1], label="chessboard.inner_corners[1]")
-        if cols <= 0 or rows <= 0:
-            raise ConfigError("chessboard.inner_corners must be > 0")
+        if cols < 2 or rows < 2:
+            raise ConfigError("chessboard.inner_corners values must be >= 2")
         square_size_mm = _require_number(
             data.get("square_size_mm"), label="chessboard.square_size_mm"
         )
@@ -291,6 +306,8 @@ class LaserConfig:
         )
         if not (0 <= stripe_intensity <= 255):
             raise ConfigError("laser.stripe_intensity must be in [0, 255]")
+        if enabled and stripe_intensity < 1:
+            raise ConfigError("laser.stripe_intensity must be in [1, 255] when laser is enabled")
 
         if enabled and all(abs(v) < 1e-15 for v in plane[:3]):
             raise ConfigError("laser.plane_in_tcp normal must be non-zero when laser is enabled")
@@ -409,12 +426,18 @@ def _scenario_from_optional(data: Any) -> ScenarioConfig | None:
         default_min=float(default_distance.get("min", 400.0)),
         default_max=float(default_distance.get("max", 1200.0)),
     )
+    if distance_mm.min <= 0.0:
+        raise ConfigError("scenario.distance_mm.min must be > 0")
     tilt_deg = _range_from_optional(
         data.get("tilt_deg"),
         label="scenario.tilt_deg",
         default_min=float(default_tilt.get("min", 0.0)),
         default_max=float(default_tilt.get("max", 45.0)),
     )
+    if tilt_deg.min < 0.0:
+        raise ConfigError("scenario.tilt_deg.min must be >= 0")
+    if tilt_deg.max > 89.0:
+        raise ConfigError("scenario.tilt_deg.max must be <= 89")
     yaw_deg = _range_from_optional(
         data.get("yaw_deg"),
         label="scenario.yaw_deg",
@@ -482,11 +505,37 @@ def _scenario_from_optional(data: Any) -> ScenarioConfig | None:
 
 
 @dataclass(frozen=True)
+class UnitsConfig:
+    """Units for geometric quantities in the config.
+
+    synthcal currently supports millimeters (mm) only.
+    """
+
+    length: str = "mm"
+
+    @classmethod
+    def from_optional(cls, data: Any) -> UnitsConfig:
+        if data is None:
+            return cls(length="mm")
+        data = _require_mapping(data, label="units")
+        length = data.get("length", "mm")
+        if not isinstance(length, str) or not length:
+            raise ConfigError("units.length must be a non-empty string")
+        if length != "mm":
+            raise ConfigError("units.length must be 'mm'")
+        return cls(length=length)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"length": self.length}
+
+
+@dataclass(frozen=True)
 class SynthCalConfig:
     """Top-level config file."""
 
-    version: int
+    config_version: int
     seed: int
+    units: UnitsConfig
     dataset: DatasetConfig
     rig: RigConfig
     chessboard: ChessboardConfig
@@ -525,8 +574,9 @@ class SynthCalConfig:
         height_mm = (chessboard.inner_corners[1] + 1) * chessboard.square_size_mm
 
         return cls(
-            version=1,
+            config_version=1,
             seed=0,
+            units=UnitsConfig(),
             dataset=DatasetConfig(name="example_dataset", num_frames=1),
             rig=RigConfig(cameras=(cam0, cam1)),
             chessboard=chessboard,
@@ -546,12 +596,35 @@ class SynthCalConfig:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SynthCalConfig:
         data = _require_mapping(data, label="config")
-        version = _require_int(data.get("version"), label="version")
-        if version != 1:
-            raise ConfigError(f"Unsupported config version {version}; expected 1")
+
+        config_version_raw = data.get("config_version", None)
+        if config_version_raw is None:
+            legacy = data.get("version", None)
+            if legacy is not None:
+                warnings.warn(
+                    "config_version missing; using legacy 'version' field (assumed v1)",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                config_version_raw = legacy
+            else:
+                warnings.warn(
+                    "config_version missing; assuming v1",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                config_version_raw = 1
+
+        config_version = _require_int(config_version_raw, label="config_version")
+        if config_version != 1:
+            raise ConfigError(
+                f"Unsupported config_version {config_version}; supported versions: [1]"
+            )
+
         seed = _require_int(data.get("seed"), label="seed")
         if seed < 0:
             raise ConfigError("seed must be >= 0")
+        units = UnitsConfig.from_optional(data.get("units"))
         dataset = DatasetConfig.from_dict(data.get("dataset"))
         rig = RigConfig.from_dict(data.get("rig"))
         chessboard = ChessboardConfig.from_dict(data.get("chessboard"))
@@ -564,8 +637,9 @@ class SynthCalConfig:
         if scenario is not None and scenario.num_frames is not None:
             dataset = DatasetConfig(name=dataset.name, num_frames=scenario.num_frames)
         return cls(
-            version=version,
+            config_version=config_version,
             seed=seed,
+            units=units,
             dataset=dataset,
             rig=rig,
             chessboard=chessboard,
@@ -577,8 +651,9 @@ class SynthCalConfig:
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
-            "version": self.version,
+            "config_version": self.config_version,
             "seed": self.seed,
+            "units": self.units.to_dict(),
             "dataset": self.dataset.to_dict(),
             "rig": self.rig.to_dict(),
             "chessboard": self.chessboard.to_dict(),

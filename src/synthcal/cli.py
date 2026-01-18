@@ -6,6 +6,7 @@ Entry point: `python -m synthcal ...`
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -112,7 +113,7 @@ def _cmd_preview(
             reference_camera=reference_cam,
         )
         vis_str = ", ".join(f"{k}={int(v)}" for k, v in sorted(vis_by_cam.items()))
-        print(f"scenario visibility: {vis_str}")
+        logging.info("scenario visibility: %s", vis_str)
 
     import matplotlib.pyplot as plt
 
@@ -266,6 +267,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="synthcal", description="Synthetic calibration dataset generator"
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging verbosity (default: INFO)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init-config", help="Write an example config.yaml")
@@ -307,6 +315,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    logging.basicConfig(
+        level=getattr(logging, str(args.log_level).upper(), logging.INFO),
+        format="%(levelname)s: %(message)s",
+    )
     try:
         if args.command == "init-config":
             return _cmd_init_config(args.path)
