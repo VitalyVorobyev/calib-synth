@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+from synthcal.io.config import load_config
+from synthcal.io.manifest import load_manifest
+
+
+def _run_module(args: list[str]) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join([str(root / "src"), env.get("PYTHONPATH", "")]).strip(
+        os.pathsep
+    )
+    subprocess.run([sys.executable, "-m", "synthcal", *args], check=True, env=env)
+
+
+def test_init_config_writes_loadable_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _run_module(["init-config", str(config_path)])
+
+    cfg = load_config(config_path)
+    assert cfg.version == 1
+    assert isinstance(cfg.seed, int)
+    assert cfg.rig.cameras
+
+
+def test_generate_creates_structure_and_manifest_paths(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _run_module(["init-config", str(config_path)])
+    cfg = load_config(config_path)
+
+    out_dir = tmp_path / "out"
+    _run_module(["generate", str(config_path), str(out_dir)])
+
+    assert (out_dir / "config.yaml").is_file()
+    assert (out_dir / "manifest.yaml").is_file()
+    assert (out_dir / "rig" / "rig.yaml").is_file()
+    assert (out_dir / "rig" / "cameras").is_dir()
+    assert (out_dir / "frames").is_dir()
+
+    manifest = load_manifest(out_dir / "manifest.yaml")
+    assert manifest.seed == cfg.seed
+
+    for rel in [
+        manifest.paths.config_yaml,
+        manifest.paths.manifest_yaml,
+        manifest.paths.rig_yaml,
+        manifest.paths.cameras_dir,
+        manifest.paths.frames_dir,
+    ]:
+        assert (out_dir / rel).exists(), f"Missing path referenced by manifest: {rel}"
+
+    for cam in manifest.cameras:
+        assert (out_dir / cam.intrinsics_yaml).is_file()
+
+    # Spot-check a couple of frame directories.
+    assert (out_dir / "frames" / "frame_000000").is_dir()
+    assert (out_dir / "frames" / f"frame_{cfg.dataset.num_frames - 1:06d}").is_dir()
+    for cam in cfg.rig.cameras:
+        assert (out_dir / "frames" / "frame_000000" / f"cam_{cam.name}").is_dir()
