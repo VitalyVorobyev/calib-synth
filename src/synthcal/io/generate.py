@@ -16,6 +16,8 @@ from PIL import Image
 from synthcal import __version__
 from synthcal.camera import PinholeCamera
 from synthcal.core.geometry import invert_se3
+from synthcal.core.seeding import derive_rng
+from synthcal.effects.pipeline import apply_effects
 from synthcal.io.config import SynthCalConfig, save_config
 from synthcal.io.manifest import (
     ManifestCamera,
@@ -151,6 +153,8 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
             T_cam_target = invert_se3(T_world_cam) @ T_world_target
 
             img = render_chessboard_image(cam, target, T_cam_target)
+            rng_target = derive_rng(cfg.seed, frame_index, cam_cfg.name, "target")
+            img = apply_effects(img, cfg.effects, rng_target)
             Image.fromarray(img, mode="L").save(frame_dir / f"{cam_cfg.name}_target.png")
 
             corners_px, visible = project_corners_px(cam, corners_xyz, T_cam_target)
@@ -191,6 +195,8 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
                         background=0,
                     )
 
+                rng_stripe = derive_rng(cfg.seed, frame_index, cam_cfg.name, "stripe")
+                stripe_img = apply_effects(stripe_img, cfg.effects, rng_stripe)
                 Image.fromarray(stripe_img, mode="L").save(frame_dir / f"{cam_cfg.name}_stripe.png")
                 np.save(
                     frame_dir / f"{cam_cfg.name}_stripe_centerline_px.npy",
