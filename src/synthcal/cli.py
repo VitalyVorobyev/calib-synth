@@ -25,11 +25,15 @@ def _cmd_generate(config_path: Path, out_dir: Path) -> int:
     return 0
 
 
-def _cmd_preview(config_path: Path, *, frame_index: int, camera_name: str | None) -> int:
+def _cmd_preview(
+    config_path: Path, *, frame_index: int, camera_name: str | None, no_effects: bool
+) -> int:
     import numpy as np
 
     from synthcal.camera import PinholeCamera
     from synthcal.core.geometry import invert_se3
+    from synthcal.core.seeding import derive_rng
+    from synthcal.effects.pipeline import apply_effects
     from synthcal.laser import (
         intersect_planes_to_line,
         normalize_plane,
@@ -88,6 +92,10 @@ def _cmd_preview(config_path: Path, *, frame_index: int, camera_name: str | None
 
     import matplotlib.pyplot as plt
 
+    if not no_effects:
+        rng_target = derive_rng(cfg.seed, frame_index, cam_cfg.name, "target")
+        img = apply_effects(img, cfg.effects, rng_target)
+
     show_laser = cfg.laser is not None and cfg.laser.enabled
     if show_laser:
         fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(10, 4))
@@ -136,6 +144,10 @@ def _cmd_preview(config_path: Path, *, frame_index: int, camera_name: str | None
                 background=0,
             )
 
+        if not no_effects:
+            rng_stripe = derive_rng(cfg.seed, frame_index, cam_cfg.name, "stripe")
+            stripe_img = apply_effects(stripe_img, cfg.effects, rng_stripe)
+
         ax1.imshow(stripe_img, cmap="gray", vmin=0, vmax=255)
         ax1.set_title("stripe + centerline")
 
@@ -179,6 +191,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Camera name (default: first camera in config)",
     )
+    p_prev.add_argument(
+        "--no-effects",
+        action="store_true",
+        help="Bypass effects (blur/noise/quantize) and show the raw render",
+    )
 
     return parser
 
@@ -191,7 +208,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "generate":
             return _cmd_generate(args.config_yaml, args.out_dir)
         if args.command == "preview":
-            return _cmd_preview(args.config_yaml, frame_index=args.frame, camera_name=args.cam)
+            return _cmd_preview(
+                args.config_yaml,
+                frame_index=args.frame,
+                camera_name=args.cam,
+                no_effects=args.no_effects,
+            )
         raise AssertionError(f"Unhandled command: {args.command}")
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)

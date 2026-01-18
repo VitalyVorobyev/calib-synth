@@ -41,6 +41,18 @@ The `generate` subcommand currently writes:
 - when laser is enabled: per-frame/per-camera `*_stripe.png` + `*_stripe_centerline_*.npy`
 - placeholder rig/camera YAML files (`rig/`)
 
+## Effects
+
+Rendered images can be post-processed to add simple realism:
+- `blur_sigma_px`: Gaussian defocus blur sigma in **pixels**
+- `noise_sigma`: zero-mean Gaussian read noise sigma in **intensity units** (0..255)
+
+Order of operations: blur → noise → clamp → quantize to uint8.
+
+Determinism: noise is seeded from the global dataset seed and a stable per-output key
+`(frame_index, camera_name, modality)` so re-generating with the same config+seed produces identical
+images. Effects are applied to both `*_target.png` and `*_stripe.png` (when present).
+
 ## CLI
 
 Initialize an example config:

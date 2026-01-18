@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from synthcal.effects.config import EffectsConfig
 from synthcal.util import require_ascii_filename_component
 
 
@@ -309,6 +310,33 @@ class LaserConfig:
         }
 
 
+def _effects_from_optional(data: Any) -> EffectsConfig:
+    if data is None:
+        return EffectsConfig()
+    data = _require_mapping(data, label="effects")
+
+    enabled = _require_bool(data.get("enabled", True), label="effects.enabled")
+    blur_sigma_px = _require_number(data.get("blur_sigma_px", 0.0), label="effects.blur_sigma_px")
+    noise_sigma = _require_number(data.get("noise_sigma", 0.0), label="effects.noise_sigma")
+    clamp_min = _require_number(data.get("clamp_min", 0.0), label="effects.clamp_min")
+    clamp_max = _require_number(data.get("clamp_max", 255.0), label="effects.clamp_max")
+
+    if blur_sigma_px < 0.0:
+        raise ConfigError("effects.blur_sigma_px must be >= 0")
+    if noise_sigma < 0.0:
+        raise ConfigError("effects.noise_sigma must be >= 0")
+    if clamp_min < 0.0 or clamp_max > 255.0 or clamp_min > clamp_max:
+        raise ConfigError("effects clamp range must satisfy 0 <= clamp_min <= clamp_max <= 255")
+
+    return EffectsConfig(
+        enabled=enabled,
+        blur_sigma_px=blur_sigma_px,
+        noise_sigma=noise_sigma,
+        clamp_min=clamp_min,
+        clamp_max=clamp_max,
+    )
+
+
 @dataclass(frozen=True)
 class SynthCalConfig:
     """Top-level config file."""
@@ -318,6 +346,7 @@ class SynthCalConfig:
     dataset: DatasetConfig
     rig: RigConfig
     chessboard: ChessboardConfig
+    effects: EffectsConfig
     laser: LaserConfig | None
     scene: SceneConfig | None
 
@@ -356,6 +385,7 @@ class SynthCalConfig:
             dataset=DatasetConfig(name="example_dataset", num_frames=1),
             rig=RigConfig(cameras=(cam0, cam1)),
             chessboard=chessboard,
+            effects=EffectsConfig(),
             laser=None,
             scene=SceneConfig(
                 T_world_target=(
@@ -379,6 +409,7 @@ class SynthCalConfig:
         dataset = DatasetConfig.from_dict(data.get("dataset"))
         rig = RigConfig.from_dict(data.get("rig"))
         chessboard = ChessboardConfig.from_dict(data.get("chessboard"))
+        effects = _effects_from_optional(data.get("effects"))
         laser = LaserConfig.from_optional(data.get("laser"))
         if laser is not None and laser.enabled is False:
             laser = None
@@ -389,6 +420,7 @@ class SynthCalConfig:
             dataset=dataset,
             rig=rig,
             chessboard=chessboard,
+            effects=effects,
             laser=laser,
             scene=scene,
         )
@@ -400,6 +432,7 @@ class SynthCalConfig:
             "dataset": self.dataset.to_dict(),
             "rig": self.rig.to_dict(),
             "chessboard": self.chessboard.to_dict(),
+            "effects": self.effects.to_dict(),
         }
         if self.laser is not None and self.laser.enabled:
             data["laser"] = self.laser.to_dict()
