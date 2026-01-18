@@ -36,6 +36,7 @@ dev = [
   "pytest>=7.4",
   "ruff>=0.5",
   "build>=1.0",
+  "twine>=5.0",
 ]
 scipy = [
   "scipy>=1.10",

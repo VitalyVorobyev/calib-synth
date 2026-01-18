@@ -1,5 +1,8 @@
 # synthcal
 
+[![CI](https://github.com/VitalyVorobyev/calib-synth/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/VitalyVorobyev/calib-synth/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/synthcal.svg)](https://pypi.org/project/synthcal/)
+
 Synthetic dataset generator for **camera + laser-stripe calibration**.
 
 ## Install
