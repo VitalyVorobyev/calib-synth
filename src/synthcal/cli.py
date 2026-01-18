@@ -9,18 +9,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from synthcal import __version__
 from synthcal.io.config import SynthCalConfig, load_config, save_config
-from synthcal.io.manifest import (
-    ManifestCamera,
-    ManifestGenerator,
-    ManifestLayout,
-    ManifestLaser,
-    ManifestPaths,
-    SynthCalManifest,
-    save_manifest,
-    utc_now_iso8601,
-)
+from synthcal.io.generate import generate_dataset
 
 
 def _cmd_init_config(path: Path) -> int:
@@ -29,111 +19,75 @@ def _cmd_init_config(path: Path) -> int:
     return 0
 
 
-def _write_rig_files(cfg: SynthCalConfig, out_dir: Path) -> None:
-    rig_dir = out_dir / "rig"
-    cams_dir = rig_dir / "cameras"
-    cams_dir.mkdir(parents=True, exist_ok=True)
-
-    rig_yaml = {
-        "version": 1,
-        "units": {"length": "mm"},
-        "cameras": [
-            {"name": cam.name, "intrinsics_yaml": f"cameras/{cam.name}.yaml"}
-            for cam in cfg.rig.cameras
-        ],
-        "notes": "Placeholder rig file (v0). Extrinsics will be added later.",
-    }
-    (rig_dir / "rig.yaml").write_text(
-        _yaml_dump(rig_yaml),
-        encoding="utf-8",
-    )
-
-    for cam in cfg.rig.cameras:
-        (cams_dir / f"{cam.name}.yaml").write_text(
-            _yaml_dump(
-                {
-                    "version": 1,
-                    "name": cam.name,
-                    "image_size_px": [cam.image_size_px[0], cam.image_size_px[1]],
-                    "K": [list(row) for row in cam.K],
-                    "dist": list(cam.dist),
-                    "notes": "Placeholder intrinsics file (v0).",
-                }
-            ),
-            encoding="utf-8",
-        )
-
-
-def _write_frame_dirs(cfg: SynthCalConfig, out_dir: Path) -> None:
-    frames_dir = out_dir / "frames"
-    frames_dir.mkdir(parents=True, exist_ok=True)
-
-    for frame_index in range(cfg.dataset.num_frames):
-        frame_dir = frames_dir / f"frame_{frame_index:06d}"
-        for cam in cfg.rig.cameras:
-            (frame_dir / f"cam_{cam.name}").mkdir(parents=True, exist_ok=True)
-
-
 def _cmd_generate(config_path: Path, out_dir: Path) -> int:
     cfg = load_config(config_path)
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    save_config(cfg, out_dir / "config.yaml")
-    _write_rig_files(cfg, out_dir)
-    _write_frame_dirs(cfg, out_dir)
-
-    laser_enabled = cfg.laser is not None and cfg.laser.enabled
-    laser_manifest = None
-    if laser_enabled:
-        laser = cfg.laser
-        assert laser is not None
-        laser_manifest = ManifestLaser(
-            enabled=True,
-            plane_in_tcp=laser.plane_in_tcp,
-            stripe_width_px=laser.stripe_width_px,
-            stripe_intensity=laser.stripe_intensity,
-        )
-
-    manifest = SynthCalManifest(
-        manifest_version=1,
-        created_utc=utc_now_iso8601(),
-        generator=ManifestGenerator(name="synthcal", version=__version__),
-        seed=cfg.seed,
-        units={"length": "mm"},
-        dataset={"name": cfg.dataset.name, "num_frames": cfg.dataset.num_frames},
-        laser=laser_manifest,
-        paths=ManifestPaths(
-            config_yaml="config.yaml",
-            manifest_yaml="manifest.yaml",
-            rig_yaml="rig/rig.yaml",
-            cameras_dir="rig/cameras",
-            frames_dir="frames",
-        ),
-        cameras=tuple(
-            ManifestCamera(
-                name=cam.name,
-                intrinsics_yaml=f"rig/cameras/{cam.name}.yaml",
-                image_size_px=cam.image_size_px,
-            )
-            for cam in cfg.rig.cameras
-        ),
-        layout=ManifestLayout.v1_default(include_laser=laser_enabled),
-    )
-    save_manifest(manifest, out_dir / "manifest.yaml")
+    generate_dataset(cfg, out_dir)
     return 0
 
 
-def _yaml_dump(data: object) -> str:
-    # Local helper to avoid a PyYAML dependency from "util".
-    import yaml
+def _cmd_preview(config_path: Path, *, frame_index: int, camera_name: str | None) -> int:
+    import numpy as np
 
-    return yaml.safe_dump(
-        data,
-        sort_keys=False,
-        indent=2,
-        default_flow_style=False,
+    from synthcal.camera import PinholeCamera
+    from synthcal.core.geometry import invert_se3
+    from synthcal.render.chessboard import render_chessboard_image
+    from synthcal.render.gt import project_corners_px
+    from synthcal.targets.chessboard import ChessboardTarget
+
+    cfg = load_config(config_path)
+    if not (0 <= frame_index < cfg.dataset.num_frames):
+        raise ValueError(f"--frame must be in [0, {cfg.dataset.num_frames - 1}]")
+
+    cam_cfg = None
+    if camera_name is None:
+        cam_cfg = cfg.rig.cameras[0]
+    else:
+        for c in cfg.rig.cameras:
+            if c.name == camera_name:
+                cam_cfg = c
+                break
+        if cam_cfg is None:
+            raise ValueError(f"Unknown camera {camera_name!r}; available: {[c.name for c in cfg.rig.cameras]}")
+
+    cols, rows = cfg.chessboard.inner_corners
+    target = ChessboardTarget(inner_rows=rows, inner_cols=cols, square_size_mm=cfg.chessboard.square_size_mm)
+    corners_xyz = target.corners_xyz()
+
+    if cfg.scene is not None:
+        T_world_target = np.asarray(cfg.scene.T_world_target, dtype=np.float64)
+    else:
+        width_mm, height_mm = target.bounds()
+        T_world_target = np.eye(4, dtype=np.float64)
+        T_world_target[:3, 3] = np.array([-width_mm / 2.0, -height_mm / 2.0, 1000.0], dtype=np.float64)
+
+    T_base_tcp = np.eye(4, dtype=np.float64)
+    T_tcp_cam = np.asarray(cam_cfg.T_tcp_cam, dtype=np.float64)
+    T_world_cam = T_base_tcp @ T_tcp_cam
+    T_cam_target = invert_se3(T_world_cam) @ T_world_target
+
+    cam = PinholeCamera(
+        resolution=cam_cfg.image_size_px,
+        K=np.asarray(cam_cfg.K, dtype=np.float64),
+        dist=np.asarray(cam_cfg.dist, dtype=np.float64),
     )
+    img = render_chessboard_image(cam, target, T_cam_target)
+    corners_px, visible = project_corners_px(cam, corners_xyz, T_cam_target)
+
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    ax.imshow(img, cmap="gray", vmin=0, vmax=255)
+    ax.set_title(f"frame={frame_index} cam={cam_cfg.name}")
+
+    if bool(np.any(visible)):
+        ax.scatter(corners_px[visible, 0], corners_px[visible, 1], s=12, c="lime", marker="o")
+    if bool(np.any(~visible)):
+        ax.scatter(corners_px[~visible, 0], corners_px[~visible, 1], s=12, c="red", marker="x")
+
+    ax.set_xlim([-0.5, cam.resolution[0] - 0.5])
+    ax.set_ylim([cam.resolution[1] - 0.5, -0.5])
+    plt.show()
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -143,9 +97,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_init = sub.add_parser("init-config", help="Write an example config.yaml")
     p_init.add_argument("path", type=Path, help="Output path for config.yaml")
 
-    p_gen = sub.add_parser("generate", help="Create dataset folder structure + manifest (no rendering yet)")
+    p_gen = sub.add_parser("generate", help="Generate dataset (renders chessboard + GT corners)")
     p_gen.add_argument("config_yaml", type=Path, help="Input config.yaml")
     p_gen.add_argument("out_dir", type=Path, help="Output dataset directory")
+
+    p_prev = sub.add_parser("preview", help="Render a single frame/camera and show a preview window")
+    p_prev.add_argument("config_yaml", type=Path, help="Input config.yaml")
+    p_prev.add_argument("--frame", type=int, default=0, help="Frame index (default: 0)")
+    p_prev.add_argument(
+        "--cam",
+        type=str,
+        default=None,
+        help="Camera name (default: first camera in config)",
+    )
 
     return parser
 
@@ -157,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_init_config(args.path)
         if args.command == "generate":
             return _cmd_generate(args.config_yaml, args.out_dir)
+        if args.command == "preview":
+            return _cmd_preview(args.config_yaml, frame_index=args.frame, camera_name=args.cam)
         raise AssertionError(f"Unhandled command: {args.command}")
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)

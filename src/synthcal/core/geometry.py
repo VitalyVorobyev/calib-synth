@@ -67,3 +67,21 @@ def transform_points(T: Any, points: Any) -> np.ndarray:
         raise ValueError(f"points must have shape (3,) or (..., 3), got {pts.shape}")
     return pts @ T[:3, :3].T + T[:3, 3]
 
+
+def invert_se3(T: Any) -> np.ndarray:
+    """Invert an SE(3) transform.
+
+    Uses the SE(3) structure:
+        T = [[R, t],
+             [0, 1]]
+        T^{-1} = [[R^T, -R^T t],
+                  [0,    1]]
+    """
+
+    T = as_se3(T)
+    R = T[:3, :3]
+    t = T[:3, 3]
+    T_inv = np.eye(4, dtype=np.float64)
+    T_inv[:3, :3] = R.T
+    T_inv[:3, 3] = -R.T @ t
+    return T_inv
