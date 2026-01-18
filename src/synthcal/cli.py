@@ -128,7 +128,7 @@ def _cmd_preview(
         T_world_cam = T_base_tcp @ T_tcp_cam
         T_cam_target = invert_se3(T_world_cam) @ T_world_target
 
-        img = render_chessboard_image(cam, target, T_cam_target)
+        img = render_chessboard_image(cam, target, T_cam_target, supersample=2)
         corners_px, visible = project_corners_px(cam, corners_xyz, T_cam_target)
         if not no_effects:
             rng_target = derive_rng(cfg.seed, frame_index, cam_name, "target")

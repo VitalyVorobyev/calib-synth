@@ -124,7 +124,7 @@ def render_frame_preview(config_obj: SynthCalConfig, frame_id: int) -> dict[str,
         T_world_cam = T_base_tcp @ T_tcp_cam
         T_cam_target = invert_se3(T_world_cam) @ T_world_target
 
-        img_target = render_chessboard_image(cam, target, T_cam_target)
+        img_target = render_chessboard_image(cam, target, T_cam_target, supersample=2)
         rng_target = derive_rng(cfg.seed, frame_id, cam_cfg.name, "target")
         img_target = apply_effects(img_target, cfg.effects, rng_target)
 

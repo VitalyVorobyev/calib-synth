@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import warnings
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 import numpy as np
 import pytest
 import yaml
 
+import synthcal
 from synthcal.api import generate_dataset, render_frame_preview
 from synthcal.io.config import ConfigError, load_config
 
@@ -172,3 +174,8 @@ def test_api_render_frame_preview_returns_arrays(tmp_path: Path) -> None:
     assert cam00["stripe_image_u8"].dtype == np.uint8
     assert cam00["stripe_centerline_px"].shape[1] == 2
     assert cam00["stripe_centerline_visible"].dtype == bool
+
+
+def test_version_matches_package_metadata() -> None:
+    assert isinstance(synthcal.__version__, str)
+    assert package_version("synthcal") == synthcal.__version__

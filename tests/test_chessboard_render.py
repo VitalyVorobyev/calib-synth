@@ -37,3 +37,33 @@ def test_chessboard_render_and_corner_projection() -> None:
     v = corners_px[visible, 1]
     assert np.all(u >= 0.0) and np.all(u < cam.resolution[0])
     assert np.all(v >= 0.0) and np.all(v < cam.resolution[1])
+
+
+def test_chessboard_supersample_antialiases_corner_center() -> None:
+    cam = PinholeCamera(
+        resolution=(640, 480),
+        K=np.array([[800.0, 0.0, 320.0], [0.0, 800.0, 240.0], [0.0, 0.0, 1.0]]),
+        dist=np.zeros(5, dtype=np.float64),
+    )
+    target = ChessboardTarget(inner_rows=6, inner_cols=9, square_size_mm=25.0)
+
+    width_mm, height_mm = target.bounds()
+    T_cam_target = np.eye(4, dtype=np.float64)
+    T_cam_target[:3, 3] = np.array([-width_mm / 2.0, -height_mm / 2.0, 1000.0], dtype=np.float64)
+
+    corners_px, visible = project_corners_px(cam, target.corners_xyz(), T_cam_target)
+    assert bool(visible[0])
+    u0, v0 = (float(corners_px[0, 0]), float(corners_px[0, 1]))
+    assert float(int(round(u0))) == u0
+    assert float(int(round(v0))) == v0
+    ui = int(u0)
+    vi = int(v0)
+
+    img_noaa = render_chessboard_image(cam, target, T_cam_target, background=128, supersample=1)
+    img_aa = render_chessboard_image(cam, target, T_cam_target, background=128, supersample=2)
+
+    # The first inner corner projects exactly to a pixel center in this setup. Without pixel-area
+    # sampling, a point-sampled renderer must choose one of the colors, which leads to a visible
+    # 0.5px aliasing bias. With supersampling, the center pixel is an even mix of black and white.
+    assert abs(int(img_noaa[vi, ui]) - 128) >= 80
+    assert abs(int(img_aa[vi, ui]) - 128) <= 2
