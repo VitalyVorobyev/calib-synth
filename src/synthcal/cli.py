@@ -15,6 +15,7 @@ from synthcal.io.manifest import (
     ManifestCamera,
     ManifestGenerator,
     ManifestLayout,
+    ManifestLaser,
     ManifestPaths,
     SynthCalManifest,
     save_manifest,
@@ -82,6 +83,18 @@ def _cmd_generate(config_path: Path, out_dir: Path) -> int:
     _write_rig_files(cfg, out_dir)
     _write_frame_dirs(cfg, out_dir)
 
+    laser_enabled = cfg.laser is not None and cfg.laser.enabled
+    laser_manifest = None
+    if laser_enabled:
+        laser = cfg.laser
+        assert laser is not None
+        laser_manifest = ManifestLaser(
+            enabled=True,
+            plane_in_tcp=laser.plane_in_tcp,
+            stripe_width_px=laser.stripe_width_px,
+            stripe_intensity=laser.stripe_intensity,
+        )
+
     manifest = SynthCalManifest(
         manifest_version=1,
         created_utc=utc_now_iso8601(),
@@ -89,6 +102,7 @@ def _cmd_generate(config_path: Path, out_dir: Path) -> int:
         seed=cfg.seed,
         units={"length": "mm"},
         dataset={"name": cfg.dataset.name, "num_frames": cfg.dataset.num_frames},
+        laser=laser_manifest,
         paths=ManifestPaths(
             config_yaml="config.yaml",
             manifest_yaml="manifest.yaml",
@@ -104,7 +118,7 @@ def _cmd_generate(config_path: Path, out_dir: Path) -> int:
             )
             for cam in cfg.rig.cameras
         ),
-        layout=ManifestLayout.v1_default(),
+        layout=ManifestLayout.v1_default(include_laser=laser_enabled),
     )
     save_manifest(manifest, out_dir / "manifest.yaml")
     return 0
@@ -147,4 +161,3 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-

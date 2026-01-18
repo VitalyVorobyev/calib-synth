@@ -25,14 +25,26 @@ def _require_mapping(value: Any, *, label: str) -> Mapping[str, Any]:
 
 
 def _require_int(value: Any, *, label: str) -> int:
-    if not isinstance(value, int):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise ManifestError(f"{label} must be an integer")
     return value
+
+
+def _require_number(value: Any, *, label: str) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ManifestError(f"{label} must be a number")
+    return float(value)
 
 
 def _require_seq(value: Any, *, label: str) -> Sequence[Any]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         raise ManifestError(f"{label} must be a sequence/list")
+    return value
+
+
+def _require_bool(value: Any, *, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise ManifestError(f"{label} must be a bool")
     return value
 
 
@@ -121,19 +133,57 @@ class ManifestCamera:
 
 
 @dataclass(frozen=True)
+class ManifestLaser:
+    """Laser parameters used to generate stripe outputs (present only when enabled)."""
+
+    enabled: bool
+    plane_in_tcp: tuple[float, float, float, float]
+    stripe_width_px: int
+    stripe_intensity: int
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ManifestLaser":
+        data = _require_mapping(data, label="laser")
+        enabled = _require_bool(data.get("enabled"), label="laser.enabled")
+
+        plane_seq = _require_seq(data.get("plane_in_tcp"), label="laser.plane_in_tcp")
+        if len(plane_seq) != 4:
+            raise ManifestError("laser.plane_in_tcp must have length 4: [a, b, c, d]")
+        plane = tuple(_require_number(plane_seq[i], label=f"laser.plane_in_tcp[{i}]") for i in range(4))
+
+        stripe_width_px = _require_int(data.get("stripe_width_px"), label="laser.stripe_width_px")
+        stripe_intensity = _require_int(data.get("stripe_intensity"), label="laser.stripe_intensity")
+
+        return cls(
+            enabled=enabled,
+            plane_in_tcp=plane,  # type: ignore[arg-type]
+            stripe_width_px=stripe_width_px,
+            stripe_intensity=stripe_intensity,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "plane_in_tcp": list(self.plane_in_tcp),
+            "stripe_width_px": self.stripe_width_px,
+            "stripe_intensity": self.stripe_intensity,
+        }
+
+
+@dataclass(frozen=True)
 class ManifestLayout:
     """Pattern strings that describe where per-frame/per-camera outputs will live."""
 
     frame_dir: str
     camera_dir: str
     target_image: str
-    stripe_image: str
     corners_px_npy: str
     corners_visible_npy: str
-    stripe_centerline_px_npy: str
+    stripe_image: str | None = None
+    stripe_centerline_px_npy: str | None = None
 
     @classmethod
-    def v1_default(cls) -> "ManifestLayout":
+    def v1_default(cls, *, include_laser: bool) -> "ManifestLayout":
         frame_dir = "frames/frame_{frame_index:06d}"
         camera_dir = "cam_{camera_name}"
         base = f"{frame_dir}/{camera_dir}"
@@ -141,10 +191,10 @@ class ManifestLayout:
             frame_dir=frame_dir,
             camera_dir=camera_dir,
             target_image=f"{base}/target.png",
-            stripe_image=f"{base}/stripe.png",
             corners_px_npy=f"{base}/corners_px.npy",
             corners_visible_npy=f"{base}/corners_visible.npy",
-            stripe_centerline_px_npy=f"{base}/stripe_centerline_px.npy",
+            stripe_image=(f"{base}/stripe.png" if include_laser else None),
+            stripe_centerline_px_npy=(f"{base}/stripe_centerline_px.npy" if include_laser else None),
         )
 
     @classmethod
@@ -154,10 +204,8 @@ class ManifestLayout:
             "frame_dir",
             "camera_dir",
             "target_image",
-            "stripe_image",
             "corners_px_npy",
             "corners_visible_npy",
-            "stripe_centerline_px_npy",
         ]
         values: dict[str, str] = {}
         for key in required:
@@ -165,18 +213,38 @@ class ManifestLayout:
             if not isinstance(value, str) or not value:
                 raise ManifestError(f"layout.{key} must be a non-empty string")
             values[key] = value
-        return cls(**values)  # type: ignore[arg-type]
+
+        stripe_image = data.get("stripe_image")
+        if stripe_image is not None and (not isinstance(stripe_image, str) or not stripe_image):
+            raise ManifestError("layout.stripe_image must be a non-empty string when present")
+
+        stripe_centerline = data.get("stripe_centerline_px_npy")
+        if stripe_centerline is not None and (
+            not isinstance(stripe_centerline, str) or not stripe_centerline
+        ):
+            raise ManifestError(
+                "layout.stripe_centerline_px_npy must be a non-empty string when present"
+            )
+
+        return cls(
+            **values,  # type: ignore[arg-type]
+            stripe_image=stripe_image,
+            stripe_centerline_px_npy=stripe_centerline,
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "frame_dir": self.frame_dir,
             "camera_dir": self.camera_dir,
             "target_image": self.target_image,
-            "stripe_image": self.stripe_image,
             "corners_px_npy": self.corners_px_npy,
             "corners_visible_npy": self.corners_visible_npy,
-            "stripe_centerline_px_npy": self.stripe_centerline_px_npy,
         }
+        if self.stripe_image is not None:
+            data["stripe_image"] = self.stripe_image
+        if self.stripe_centerline_px_npy is not None:
+            data["stripe_centerline_px_npy"] = self.stripe_centerline_px_npy
+        return data
 
 
 @dataclass(frozen=True)
@@ -189,6 +257,7 @@ class SynthCalManifest:
     seed: int
     units: dict[str, Any]
     dataset: dict[str, Any]
+    laser: ManifestLaser | None
     paths: ManifestPaths
     cameras: tuple[ManifestCamera, ...]
     layout: ManifestLayout
@@ -208,6 +277,8 @@ class SynthCalManifest:
         seed = _require_int(data.get("seed"), label="seed")
         units = _require_mapping(data.get("units"), label="units")
         dataset = _require_mapping(data.get("dataset"), label="dataset")
+        laser_raw = data.get("laser")
+        laser = None if laser_raw is None else ManifestLaser.from_dict(laser_raw)
         paths = ManifestPaths.from_dict(data.get("paths"))
 
         cameras_raw = _require_seq(data.get("cameras"), label="cameras")
@@ -221,13 +292,14 @@ class SynthCalManifest:
             seed=seed,
             units=dict(units),
             dataset=dict(dataset),
+            laser=laser,
             paths=paths,
             cameras=cameras,
             layout=layout,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "manifest_version": self.manifest_version,
             "created_utc": self.created_utc,
             "generator": self.generator.to_dict(),
@@ -238,6 +310,9 @@ class SynthCalManifest:
             "cameras": [c.to_dict() for c in self.cameras],
             "layout": self.layout.to_dict(),
         }
+        if self.laser is not None and self.laser.enabled:
+            data["laser"] = self.laser.to_dict()
+        return data
 
 
 def utc_now_iso8601() -> str:
@@ -271,4 +346,3 @@ def save_manifest(manifest: SynthCalManifest, path: str | Path) -> None:
         default_flow_style=False,
     )
     path.write_text(text, encoding="utf-8")
-

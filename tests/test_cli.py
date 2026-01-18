@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 from synthcal.io.config import load_config
 from synthcal.io.manifest import load_manifest
 
@@ -62,3 +64,30 @@ def test_generate_creates_structure_and_manifest_paths(tmp_path: Path) -> None:
     assert (out_dir / "frames" / f"frame_{cfg.dataset.num_frames - 1:06d}").is_dir()
     for cam in cfg.rig.cameras:
         assert (out_dir / "frames" / "frame_000000" / f"cam_{cam.name}").is_dir()
+
+
+def test_generate_omits_laser_outputs_when_disabled(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _run_module(["init-config", str(config_path)])
+
+    # Disable laser by setting the section to null (also validates that config loader accepts it).
+    cfg_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    cfg_data["laser"] = None
+    config_path.write_text(
+        yaml.safe_dump(cfg_data, sort_keys=False, indent=2, default_flow_style=False),
+        encoding="utf-8",
+    )
+
+    out_dir = tmp_path / "out"
+    _run_module(["generate", str(config_path), str(out_dir)])
+
+    manifest_path = out_dir / "manifest.yaml"
+    manifest_raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    assert "laser" not in manifest_raw
+    assert "stripe_image" not in manifest_raw["layout"]
+    assert "stripe_centerline_px_npy" not in manifest_raw["layout"]
+
+    manifest = load_manifest(manifest_path)
+    assert manifest.laser is None
+    assert manifest.layout.stripe_image is None
+    assert manifest.layout.stripe_centerline_px_npy is None

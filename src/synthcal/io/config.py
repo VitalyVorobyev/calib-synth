@@ -22,7 +22,7 @@ def _require_mapping(value: Any, *, label: str) -> Mapping[str, Any]:
 
 
 def _require_int(value: Any, *, label: str) -> int:
-    if not isinstance(value, int):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"{label} must be an integer")
     return value
 
@@ -36,6 +36,12 @@ def _require_number(value: Any, *, label: str) -> float:
 def _require_seq(value: Any, *, label: str) -> Sequence[Any]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         raise ConfigError(f"{label} must be a sequence/list")
+    return value
+
+
+def _require_bool(value: Any, *, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise ConfigError(f"{label} must be a bool")
     return value
 
 
@@ -180,6 +186,65 @@ class RigConfig:
 
 
 @dataclass(frozen=True)
+class LaserConfig:
+    """Laser configuration (optional).
+
+    When `enabled` is false, laser outputs (stripe image / centerline) are not produced.
+    """
+
+    enabled: bool
+    plane_in_tcp: tuple[float, float, float, float]
+    stripe_width_px: int
+    stripe_intensity: int
+
+    @classmethod
+    def from_optional(cls, data: Any) -> "LaserConfig | None":
+        if data is None:
+            return None
+        return cls.from_dict(data)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "LaserConfig":
+        data = _require_mapping(data, label="laser")
+        enabled = _require_bool(data.get("enabled", False), label="laser.enabled")
+
+        plane_raw = data.get("plane_in_tcp", [0.0, 0.0, 1.0, 0.0])
+        plane_seq = _require_seq(plane_raw, label="laser.plane_in_tcp")
+        if len(plane_seq) != 4:
+            raise ConfigError("laser.plane_in_tcp must have length 4: [a, b, c, d]")
+        plane = tuple(
+            _require_number(plane_seq[i], label=f"laser.plane_in_tcp[{i}]") for i in range(4)
+        )
+
+        stripe_width_px = _require_int(data.get("stripe_width_px", 3), label="laser.stripe_width_px")
+        if stripe_width_px <= 0:
+            raise ConfigError("laser.stripe_width_px must be > 0")
+
+        stripe_intensity = _require_int(
+            data.get("stripe_intensity", 255), label="laser.stripe_intensity"
+        )
+        if not (0 <= stripe_intensity <= 255):
+            raise ConfigError("laser.stripe_intensity must be in [0, 255]")
+
+        if enabled and all(abs(v) < 1e-15 for v in plane[:3]):
+            raise ConfigError("laser.plane_in_tcp normal must be non-zero when laser is enabled")
+
+        return cls(
+            enabled=enabled,
+            plane_in_tcp=plane,  # type: ignore[arg-type]
+            stripe_width_px=stripe_width_px,
+            stripe_intensity=stripe_intensity,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "plane_in_tcp": list(self.plane_in_tcp),
+            "stripe_width_px": self.stripe_width_px,
+            "stripe_intensity": self.stripe_intensity,
+        }
+
+@dataclass(frozen=True)
 class SynthCalConfig:
     """Top-level config file."""
 
@@ -188,6 +253,7 @@ class SynthCalConfig:
     dataset: DatasetConfig
     rig: RigConfig
     chessboard: ChessboardConfig
+    laser: LaserConfig | None
 
     @classmethod
     def example(cls) -> "SynthCalConfig":
@@ -212,6 +278,12 @@ class SynthCalConfig:
             dataset=DatasetConfig(name="example_dataset", num_frames=5),
             rig=RigConfig(cameras=(cam0, cam1)),
             chessboard=ChessboardConfig(inner_corners=(9, 6), square_size_mm=25.0),
+            laser=LaserConfig(
+                enabled=True,
+                plane_in_tcp=(0.0, 0.0, 1.0, 0.0),
+                stripe_width_px=3,
+                stripe_intensity=255,
+            ),
         )
 
     @classmethod
@@ -226,16 +298,29 @@ class SynthCalConfig:
         dataset = DatasetConfig.from_dict(data.get("dataset"))
         rig = RigConfig.from_dict(data.get("rig"))
         chessboard = ChessboardConfig.from_dict(data.get("chessboard"))
-        return cls(version=version, seed=seed, dataset=dataset, rig=rig, chessboard=chessboard)
+        laser = LaserConfig.from_optional(data.get("laser"))
+        if laser is not None and laser.enabled is False:
+            laser = None
+        return cls(
+            version=version,
+            seed=seed,
+            dataset=dataset,
+            rig=rig,
+            chessboard=chessboard,
+            laser=laser,
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "version": self.version,
             "seed": self.seed,
             "dataset": self.dataset.to_dict(),
             "rig": self.rig.to_dict(),
             "chessboard": self.chessboard.to_dict(),
         }
+        if self.laser is not None and self.laser.enabled:
+            data["laser"] = self.laser.to_dict()
+        return data
 
 
 def load_config(path: str | Path) -> SynthCalConfig:
@@ -263,4 +348,3 @@ def save_config(config: SynthCalConfig, path: str | Path) -> None:
         default_flow_style=False,
     )
     path.write_text(text, encoding="utf-8")
-
