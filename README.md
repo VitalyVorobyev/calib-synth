@@ -36,7 +36,7 @@ Undistortion is implemented as a simple fixed-point iteration starting from `(xu
 The `generate` subcommand currently writes:
 - `config.yaml` (the normalized config used to generate)
 - `manifest.yaml` (stable schema v1)
-- per-frame `T_base_tcp.npy` (currently identity for all frames, v0)
+- per-frame `T_base_tcp.npy` (identity for all frames unless `scenario` pose sampling is enabled)
 - per-frame/per-camera `*_target.png` + `*_corners_*.npy`
 - when laser is enabled: per-frame/per-camera `*_stripe.png` + `*_stripe_centerline_*.npy`
 - placeholder rig/camera YAML files (`rig/`)
@@ -52,6 +52,12 @@ Order of operations: blur → noise → clamp → quantize to uint8.
 Determinism: noise is seeded from the global dataset seed and a stable per-output key
 `(frame_index, camera_name, modality)` so re-generating with the same config+seed produces identical
 images. Effects are applied to both `*_target.png` and `*_stripe.png` (when present).
+
+## Scenario
+
+Optional `scenario` pose sampling can generate a different `T_base_tcp` per frame while enforcing
+in-view constraints (all corners inside the image with a margin). Presets `easy|medium|hard` provide
+reasonable default ranges; all randomness is derived from the global seed.
 
 ## CLI
 
