@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from synthcal.effects.config import EffectsConfig
+from synthcal.scenario.config import InViewConfig, RangeConfig, ScenarioConfig
 from synthcal.util import require_ascii_filename_component
 
 
@@ -337,6 +338,149 @@ def _effects_from_optional(data: Any) -> EffectsConfig:
     )
 
 
+def _range_from_optional(
+    data: Any, *, label: str, default_min: float, default_max: float
+) -> RangeConfig:
+    if data is None:
+        return RangeConfig(min=default_min, max=default_max)
+    data = _require_mapping(data, label=label)
+    min_v = _require_number(data.get("min", default_min), label=f"{label}.min")
+    max_v = _require_number(data.get("max", default_max), label=f"{label}.max")
+    if max_v < min_v:
+        raise ConfigError(f"{label}.max must be >= {label}.min")
+    return RangeConfig(min=min_v, max=max_v)
+
+
+def _scenario_preset_defaults(name: str) -> dict[str, Any]:
+    preset = name.strip().lower()
+    if preset == "easy":
+        return {
+            "distance_mm": {"min": 800.0, "max": 1200.0},
+            "tilt_deg": {"min": 0.0, "max": 20.0},
+            "xy_offset_frac": {"min": -0.05, "max": 0.05},
+            "in_view": {"margin_px": 20, "require_all_cameras": True, "min_cameras_visible": 1},
+            "max_attempts_per_frame": 200,
+        }
+    if preset == "medium":
+        return {
+            "distance_mm": {"min": 600.0, "max": 1200.0},
+            "tilt_deg": {"min": 0.0, "max": 45.0},
+            "xy_offset_frac": {"min": -0.1, "max": 0.1},
+            "in_view": {"margin_px": 20, "require_all_cameras": True, "min_cameras_visible": 1},
+            "max_attempts_per_frame": 500,
+        }
+    if preset == "hard":
+        return {
+            "distance_mm": {"min": 400.0, "max": 1000.0},
+            "tilt_deg": {"min": 15.0, "max": 60.0},
+            "xy_offset_frac": {"min": -0.2, "max": 0.2},
+            "in_view": {"margin_px": 10, "require_all_cameras": False, "min_cameras_visible": 1},
+            "max_attempts_per_frame": 800,
+        }
+    raise ConfigError(f"Unknown scenario.preset {name!r}; expected one of: easy, medium, hard")
+
+
+def _scenario_from_optional(data: Any) -> ScenarioConfig | None:
+    if data is None:
+        return None
+    data = _require_mapping(data, label="scenario")
+
+    preset = data.get("preset", None)
+    preset_defaults: dict[str, Any] = {}
+    if isinstance(preset, str) and preset.strip():
+        preset_defaults = _scenario_preset_defaults(preset)
+
+    num_frames_raw = data.get("num_frames", preset_defaults.get("num_frames", None))
+    num_frames = None
+    if num_frames_raw is not None:
+        num_frames = _require_int(num_frames_raw, label="scenario.num_frames")
+        if num_frames <= 0:
+            raise ConfigError("scenario.num_frames must be > 0")
+
+    default_distance = preset_defaults.get("distance_mm", {"min": 400.0, "max": 1200.0})
+    default_tilt = preset_defaults.get("tilt_deg", {"min": 0.0, "max": 45.0})
+    default_yaw = preset_defaults.get("yaw_deg", {"min": -180.0, "max": 180.0})
+    default_roll = preset_defaults.get("roll_deg", {"min": -180.0, "max": 180.0})
+    default_xy = preset_defaults.get("xy_offset_frac", {"min": 0.0, "max": 0.0})
+
+    distance_mm = _range_from_optional(
+        data.get("distance_mm"),
+        label="scenario.distance_mm",
+        default_min=float(default_distance.get("min", 400.0)),
+        default_max=float(default_distance.get("max", 1200.0)),
+    )
+    tilt_deg = _range_from_optional(
+        data.get("tilt_deg"),
+        label="scenario.tilt_deg",
+        default_min=float(default_tilt.get("min", 0.0)),
+        default_max=float(default_tilt.get("max", 45.0)),
+    )
+    yaw_deg = _range_from_optional(
+        data.get("yaw_deg"),
+        label="scenario.yaw_deg",
+        default_min=float(default_yaw.get("min", -180.0)),
+        default_max=float(default_yaw.get("max", 180.0)),
+    )
+    roll_deg = _range_from_optional(
+        data.get("roll_deg"),
+        label="scenario.roll_deg",
+        default_min=float(default_roll.get("min", -180.0)),
+        default_max=float(default_roll.get("max", 180.0)),
+    )
+    xy_offset_frac = _range_from_optional(
+        data.get("xy_offset_frac"),
+        label="scenario.xy_offset_frac",
+        default_min=float(default_xy.get("min", 0.0)),
+        default_max=float(default_xy.get("max", 0.0)),
+    )
+
+    max_attempts = _require_int(
+        data.get("max_attempts_per_frame", preset_defaults.get("max_attempts_per_frame", 500)),
+        label="scenario.max_attempts_per_frame",
+    )
+    if max_attempts <= 0:
+        raise ConfigError("scenario.max_attempts_per_frame must be > 0")
+
+    default_in_view = preset_defaults.get("in_view", {})
+    in_view_raw = data.get("in_view", {})
+    in_view_map = _require_mapping(in_view_raw, label="scenario.in_view")
+    margin_px = _require_int(
+        in_view_map.get("margin_px", default_in_view.get("margin_px", 20)),
+        label="scenario.in_view.margin_px",
+    )
+    if margin_px < 0:
+        raise ConfigError("scenario.in_view.margin_px must be >= 0")
+    require_all_cameras = _require_bool(
+        in_view_map.get("require_all_cameras", default_in_view.get("require_all_cameras", True)),
+        label="scenario.in_view.require_all_cameras",
+    )
+    min_cameras_visible = _require_int(
+        in_view_map.get("min_cameras_visible", default_in_view.get("min_cameras_visible", 1)),
+        label="scenario.in_view.min_cameras_visible",
+    )
+    if min_cameras_visible <= 0:
+        raise ConfigError("scenario.in_view.min_cameras_visible must be > 0")
+
+    in_view = InViewConfig(
+        margin_px=margin_px,
+        require_all_cameras=require_all_cameras,
+        min_cameras_visible=min_cameras_visible,
+    )
+
+    preset_out = preset.strip() if isinstance(preset, str) and preset.strip() else None
+    return ScenarioConfig(
+        num_frames=num_frames,
+        distance_mm=distance_mm,
+        tilt_deg=tilt_deg,
+        yaw_deg=yaw_deg,
+        roll_deg=roll_deg,
+        xy_offset_frac=xy_offset_frac,
+        in_view=in_view,
+        max_attempts_per_frame=max_attempts,
+        preset=preset_out,
+    )
+
+
 @dataclass(frozen=True)
 class SynthCalConfig:
     """Top-level config file."""
@@ -349,6 +493,7 @@ class SynthCalConfig:
     effects: EffectsConfig
     laser: LaserConfig | None
     scene: SceneConfig | None
+    scenario: ScenarioConfig | None
 
     @classmethod
     def example(cls) -> SynthCalConfig:
@@ -395,6 +540,7 @@ class SynthCalConfig:
                     (0.0, 0.0, 0.0, 1.0),
                 )
             ),
+            scenario=None,
         )
 
     @classmethod
@@ -410,10 +556,13 @@ class SynthCalConfig:
         rig = RigConfig.from_dict(data.get("rig"))
         chessboard = ChessboardConfig.from_dict(data.get("chessboard"))
         effects = _effects_from_optional(data.get("effects"))
+        scenario = _scenario_from_optional(data.get("scenario"))
         laser = LaserConfig.from_optional(data.get("laser"))
         if laser is not None and laser.enabled is False:
             laser = None
         scene = SceneConfig.from_optional(data.get("scene"))
+        if scenario is not None and scenario.num_frames is not None:
+            dataset = DatasetConfig(name=dataset.name, num_frames=scenario.num_frames)
         return cls(
             version=version,
             seed=seed,
@@ -423,6 +572,7 @@ class SynthCalConfig:
             effects=effects,
             laser=laser,
             scene=scene,
+            scenario=scenario,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -434,6 +584,8 @@ class SynthCalConfig:
             "chessboard": self.chessboard.to_dict(),
             "effects": self.effects.to_dict(),
         }
+        if self.scenario is not None:
+            data["scenario"] = self.scenario.to_dict()
         if self.laser is not None and self.laser.enabled:
             data["laser"] = self.laser.to_dict()
         if self.scene is not None:

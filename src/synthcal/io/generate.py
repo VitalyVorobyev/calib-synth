@@ -38,6 +38,7 @@ from synthcal.laser import (
 from synthcal.render.chessboard import render_chessboard_image
 from synthcal.render.gt import project_corners_px
 from synthcal.render.stripe import render_stripe_image
+from synthcal.scenario.sampling import sample_valid_T_base_tcp
 from synthcal.targets.chessboard import ChessboardTarget
 
 
@@ -129,8 +130,16 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
     frames_dir = out_dir / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    # For v0, use a single static TCP pose for all frames (identity).
-    T_base_tcp = np.eye(4, dtype=np.float64)
+    camera_models: dict[str, PinholeCamera] = {}
+    rig_T_tcp_cam: dict[str, np.ndarray] = {}
+    for cam_cfg in cfg.rig.cameras:
+        camera_models[cam_cfg.name] = PinholeCamera(
+            resolution=cam_cfg.image_size_px,
+            K=np.asarray(cam_cfg.K, dtype=np.float64),
+            dist=np.asarray(cam_cfg.dist, dtype=np.float64),
+        )
+        rig_T_tcp_cam[cam_cfg.name] = _mat44(cam_cfg.T_tcp_cam)
+
     laser_plane_tcp = None
     if cfg.laser is not None and cfg.laser.enabled:
         laser_plane_tcp = normalize_plane(np.asarray(cfg.laser.plane_in_tcp, dtype=np.float64))
@@ -139,16 +148,26 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
     for frame_index in range(cfg.dataset.num_frames):
         frame_dir = frames_dir / f"frame_{frame_index:06d}"
         frame_dir.mkdir(parents=True, exist_ok=True)
+        if cfg.scenario is None:
+            T_base_tcp = np.eye(4, dtype=np.float64)
+        else:
+            reference_cam = cfg.rig.cameras[0].name
+            T_base_tcp, _vis = sample_valid_T_base_tcp(
+                global_seed=cfg.seed,
+                frame_id=frame_index,
+                scenario=cfg.scenario,
+                cameras=camera_models,
+                rig_extrinsics=rig_T_tcp_cam,
+                target=target,
+                T_world_target=T_world_target,
+                reference_camera=reference_cam,
+            )
         np.save(frame_dir / "T_base_tcp.npy", T_base_tcp)
 
         for cam_cfg in cfg.rig.cameras:
-            cam = PinholeCamera(
-                resolution=cam_cfg.image_size_px,
-                K=np.asarray(cam_cfg.K, dtype=np.float64),
-                dist=np.asarray(cam_cfg.dist, dtype=np.float64),
-            )
+            cam = camera_models[cam_cfg.name]
 
-            T_tcp_cam = _mat44(cam_cfg.T_tcp_cam)
+            T_tcp_cam = rig_T_tcp_cam[cam_cfg.name]
             T_world_cam = T_base_tcp @ T_tcp_cam
             T_cam_target = invert_se3(T_world_cam) @ T_world_target
 
