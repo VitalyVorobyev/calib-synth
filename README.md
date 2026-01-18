@@ -34,12 +34,13 @@ Undistortion is implemented as a simple fixed-point iteration starting from `(xu
 ## Current state
 
 The `generate` subcommand currently writes:
-- output folder structure
 - `config.yaml` (the normalized config used to generate)
 - `manifest.yaml` (stable schema v1)
-- placeholder rig/camera YAML files
+- per-frame `T_base_tcp.npy` (currently identity for all frames, v0)
+- per-frame/per-camera `*_target.png` + `*_corners_*.npy`
+- placeholder rig/camera YAML files (`rig/`)
 
-Rendering of images and ground-truth arrays will be added next.
+Laser/stripe rendering is not implemented yet.
 
 ## CLI
 
@@ -55,15 +56,24 @@ Create an output directory with manifest + placeholders:
 python -m synthcal generate config.yaml out_dataset/
 ```
 
+Preview one frame/camera with a matplotlib overlay:
+
+```bash
+python -m synthcal preview config.yaml --frame 0 --cam cam00
+```
+
 ## Output format (planned)
 
 The dataset layout is described in `manifest.yaml`. The v1 layout patterns include:
-- `frames/frame_{frame_index:06d}/cam_{camera_name}/target.png`
-- `frames/frame_{frame_index:06d}/cam_{camera_name}/corners_px.npy`
-- `frames/frame_{frame_index:06d}/cam_{camera_name}/corners_visible.npy`
+- `frames/frame_{frame_index:06d}/{camera_name}_target.png`
+- `frames/frame_{frame_index:06d}/{camera_name}_corners_px.npy`
+- `frames/frame_{frame_index:06d}/{camera_name}_corners_visible.npy`
 
-When `laser.enabled: true` in the config, the manifest additionally lists:
-- `frames/frame_{frame_index:06d}/cam_{camera_name}/stripe.png`
-- `frames/frame_{frame_index:06d}/cam_{camera_name}/stripe_centerline_px.npy`
+Additional files created per frame (not currently described by the manifest):
+- `frames/frame_{frame_index:06d}/T_base_tcp.npy`
 
-For v0, the generator creates the `frames/` folder and per-frame/per-camera directories but does not yet render the files.
+## Coordinate conventions
+
+- `T_cam_target` maps target-frame points into the camera frame: `X_cam = T_cam_target @ [X_target, 1]`.
+- The chessboard target lies in plane `Z=0` in the target frame, with outer corner at `(0,0,0)`.
+- Inner corners are ordered row-major (rows first, then cols), matching OpenCV’s convention.

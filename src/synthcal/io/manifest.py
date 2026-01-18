@@ -183,18 +183,20 @@ class ManifestLayout:
     stripe_centerline_px_npy: str | None = None
 
     @classmethod
-    def v1_default(cls, *, include_laser: bool) -> "ManifestLayout":
+    def v1_default(cls, *, include_laser: bool = False) -> "ManifestLayout":
         frame_dir = "frames/frame_{frame_index:06d}"
-        camera_dir = "cam_{camera_name}"
-        base = f"{frame_dir}/{camera_dir}"
+        camera_dir = "."
+        base = frame_dir
         return cls(
             frame_dir=frame_dir,
             camera_dir=camera_dir,
-            target_image=f"{base}/target.png",
-            corners_px_npy=f"{base}/corners_px.npy",
-            corners_visible_npy=f"{base}/corners_visible.npy",
-            stripe_image=(f"{base}/stripe.png" if include_laser else None),
-            stripe_centerline_px_npy=(f"{base}/stripe_centerline_px.npy" if include_laser else None),
+            target_image=f"{base}/{{camera_name}}_target.png",
+            corners_px_npy=f"{base}/{{camera_name}}_corners_px.npy",
+            corners_visible_npy=f"{base}/{{camera_name}}_corners_visible.npy",
+            stripe_image=(f"{base}/{{camera_name}}_stripe.png" if include_laser else None),
+            stripe_centerline_px_npy=(
+                f"{base}/{{camera_name}}_stripe_centerline_px.npy" if include_laser else None
+            ),
         )
 
     @classmethod

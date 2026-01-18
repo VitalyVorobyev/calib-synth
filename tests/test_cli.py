@@ -59,11 +59,14 @@ def test_generate_creates_structure_and_manifest_paths(tmp_path: Path) -> None:
     for cam in manifest.cameras:
         assert (out_dir / cam.intrinsics_yaml).is_file()
 
-    # Spot-check a couple of frame directories.
+    # Spot-check a couple of frame directories and expected outputs.
     assert (out_dir / "frames" / "frame_000000").is_dir()
     assert (out_dir / "frames" / f"frame_{cfg.dataset.num_frames - 1:06d}").is_dir()
+    assert (out_dir / "frames" / "frame_000000" / "T_base_tcp.npy").is_file()
     for cam in cfg.rig.cameras:
-        assert (out_dir / "frames" / "frame_000000" / f"cam_{cam.name}").is_dir()
+        assert (out_dir / "frames" / "frame_000000" / f"{cam.name}_target.png").is_file()
+        assert (out_dir / "frames" / "frame_000000" / f"{cam.name}_corners_px.npy").is_file()
+        assert (out_dir / "frames" / "frame_000000" / f"{cam.name}_corners_visible.npy").is_file()
 
 
 def test_generate_omits_laser_outputs_when_disabled(tmp_path: Path) -> None:

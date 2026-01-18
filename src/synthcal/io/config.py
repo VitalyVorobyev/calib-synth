@@ -45,6 +45,35 @@ def _require_bool(value: Any, *, label: str) -> bool:
     return value
 
 
+def _require_mat44(value: Any, *, label: str) -> tuple[tuple[float, float, float, float], ...]:
+    rows = _require_seq(value, label=label)
+    if len(rows) != 4:
+        raise ConfigError(f"{label} must be a 4x4 matrix")
+    out: list[tuple[float, float, float, float]] = []
+    for r in range(4):
+        row = _require_seq(rows[r], label=f"{label}[{r}]")
+        if len(row) != 4:
+            raise ConfigError(f"{label} must be a 4x4 matrix")
+        out.append(
+            (
+                _require_number(row[0], label=f"{label}[{r}][0]"),
+                _require_number(row[1], label=f"{label}[{r}][1]"),
+                _require_number(row[2], label=f"{label}[{r}][2]"),
+                _require_number(row[3], label=f"{label}[{r}][3]"),
+            )
+        )
+    return tuple(out)
+
+
+def _mat44_identity() -> tuple[tuple[float, float, float, float], ...]:
+    return (
+        (1.0, 0.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0, 0.0),
+        (0.0, 0.0, 1.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+
+
 @dataclass(frozen=True)
 class DatasetConfig:
     """Dataset-level parameters."""
@@ -110,6 +139,7 @@ class CameraConfig:
     image_size_px: tuple[int, int]
     K: tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]
     dist: tuple[float, float, float, float, float]
+    T_tcp_cam: tuple[tuple[float, float, float, float], ...]
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "CameraConfig":
@@ -146,11 +176,17 @@ class CameraConfig:
         dist = tuple(
             _require_number(dist_raw[i], label=f"camera[{name}].dist[{i}]") for i in range(5)
         )
+
+        T_tcp_cam_raw = data.get("T_tcp_cam", None)
+        T_tcp_cam = _mat44_identity() if T_tcp_cam_raw is None else _require_mat44(
+            T_tcp_cam_raw, label=f"camera[{name}].T_tcp_cam"
+        )
         return cls(
             name=name,
             image_size_px=(width, height),
             K=(K_rows[0], K_rows[1], K_rows[2]),
             dist=dist,  # type: ignore[arg-type]
+            T_tcp_cam=T_tcp_cam,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -160,6 +196,7 @@ class CameraConfig:
             "image_size_px": [width, height],
             "K": [list(row) for row in self.K],
             "dist": list(self.dist),
+            "T_tcp_cam": [list(row) for row in self.T_tcp_cam],
         }
 
 
@@ -183,6 +220,28 @@ class RigConfig:
 
     def to_dict(self) -> dict[str, Any]:
         return {"cameras": [c.to_dict() for c in self.cameras]}
+
+
+@dataclass(frozen=True)
+class SceneConfig:
+    """Static scene description."""
+
+    T_world_target: tuple[tuple[float, float, float, float], ...]
+
+    @classmethod
+    def from_optional(cls, data: Any) -> "SceneConfig | None":
+        if data is None:
+            return None
+        return cls.from_dict(data)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "SceneConfig":
+        data = _require_mapping(data, label="scene")
+        T_world_target = _require_mat44(data.get("T_world_target"), label="scene.T_world_target")
+        return cls(T_world_target=T_world_target)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"T_world_target": [list(row) for row in self.T_world_target]}
 
 
 @dataclass(frozen=True)
@@ -254,6 +313,7 @@ class SynthCalConfig:
     rig: RigConfig
     chessboard: ChessboardConfig
     laser: LaserConfig | None
+    scene: SceneConfig | None
 
     @classmethod
     def example(cls) -> "SynthCalConfig":
@@ -261,28 +321,43 @@ class SynthCalConfig:
 
         # A single camera with reasonable-looking intrinsics for 1280x720.
         cam0 = CameraConfig(
-            name="cam0",
-            image_size_px=(1280, 720),
-            K=((900.0, 0.0, 640.0), (0.0, 900.0, 360.0), (0.0, 0.0, 1.0)),
+            name="cam00",
+            image_size_px=(640, 480),
+            K=((800.0, 0.0, 320.0), (0.0, 800.0, 240.0), (0.0, 0.0, 1.0)),
             dist=(0.0, 0.0, 0.0, 0.0, 0.0),
+            T_tcp_cam=_mat44_identity(),
         )
         cam1 = CameraConfig(
-            name="cam1",
-            image_size_px=(1280, 720),
-            K=((900.0, 0.0, 640.0), (0.0, 900.0, 360.0), (0.0, 0.0, 1.0)),
+            name="cam01",
+            image_size_px=(640, 480),
+            K=((800.0, 0.0, 320.0), (0.0, 800.0, 240.0), (0.0, 0.0, 1.0)),
             dist=(0.0, 0.0, 0.0, 0.0, 0.0),
+            T_tcp_cam=(
+                (1.0, 0.0, 0.0, 100.0),
+                (0.0, 1.0, 0.0, 0.0),
+                (0.0, 0.0, 1.0, 0.0),
+                (0.0, 0.0, 0.0, 1.0),
+            ),
         )
+
+        chessboard = ChessboardConfig(inner_corners=(9, 6), square_size_mm=25.0)
+        width_mm = (chessboard.inner_corners[0] + 1) * chessboard.square_size_mm
+        height_mm = (chessboard.inner_corners[1] + 1) * chessboard.square_size_mm
+
         return cls(
             version=1,
             seed=0,
-            dataset=DatasetConfig(name="example_dataset", num_frames=5),
+            dataset=DatasetConfig(name="example_dataset", num_frames=1),
             rig=RigConfig(cameras=(cam0, cam1)),
-            chessboard=ChessboardConfig(inner_corners=(9, 6), square_size_mm=25.0),
-            laser=LaserConfig(
-                enabled=True,
-                plane_in_tcp=(0.0, 0.0, 1.0, 0.0),
-                stripe_width_px=3,
-                stripe_intensity=255,
+            chessboard=chessboard,
+            laser=None,
+            scene=SceneConfig(
+                T_world_target=(
+                    (1.0, 0.0, 0.0, -width_mm / 2.0),
+                    (0.0, 1.0, 0.0, -height_mm / 2.0),
+                    (0.0, 0.0, 1.0, 1000.0),
+                    (0.0, 0.0, 0.0, 1.0),
+                )
             ),
         )
 
@@ -301,6 +376,7 @@ class SynthCalConfig:
         laser = LaserConfig.from_optional(data.get("laser"))
         if laser is not None and laser.enabled is False:
             laser = None
+        scene = SceneConfig.from_optional(data.get("scene"))
         return cls(
             version=version,
             seed=seed,
@@ -308,6 +384,7 @@ class SynthCalConfig:
             rig=rig,
             chessboard=chessboard,
             laser=laser,
+            scene=scene,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -320,6 +397,8 @@ class SynthCalConfig:
         }
         if self.laser is not None and self.laser.enabled:
             data["laser"] = self.laser.to_dict()
+        if self.scene is not None:
+            data["scene"] = self.scene.to_dict()
         return data
 
 
