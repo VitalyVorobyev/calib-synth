@@ -4,7 +4,10 @@ units:
   length: mm
 dataset:
   name: minimal_with_laser
-  num_frames: 1
+  num_frames: 3
+target_sampling:
+  preset: easy
+  num_frames: 3
 rig:
   cameras:
     - name: cam00
@@ -33,4 +36,3 @@ laser:
   plane_in_tcp: [1.0, 0.0, 0.0, 0.0]
   stripe_width_px: 3
   stripe_intensity: 255
-

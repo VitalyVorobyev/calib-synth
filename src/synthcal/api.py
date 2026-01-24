@@ -26,7 +26,7 @@ from synthcal.laser import (
 from synthcal.render.chessboard import render_chessboard_image
 from synthcal.render.gt import project_corners_px
 from synthcal.render.stripe import render_stripe_image
-from synthcal.scenario.sampling import sample_valid_T_base_tcp
+from synthcal.scenario.sampling import sample_valid_T_base_tcp, sample_valid_T_tcp_target
 from synthcal.targets.chessboard import ChessboardTarget
 
 
@@ -71,10 +71,12 @@ def render_frame_preview(config_obj: SynthCalConfig, frame_id: int) -> dict[str,
     )
     corners_xyz = target.corners_xyz()
 
-    if cfg.scene is not None:
-        T_world_target = np.asarray(cfg.scene.T_world_target, dtype=np.float64)
+    if cfg.target_sampling is not None:
+        T_world_target_static = None
+    elif cfg.scene is not None:
+        T_world_target_static = np.asarray(cfg.scene.T_world_target, dtype=np.float64)
     else:
-        T_world_target = _default_T_world_target(target)
+        T_world_target_static = _default_T_world_target(target)
 
     camera_models: dict[str, PinholeCamera] = {}
     rig_T_tcp_cam: dict[str, np.ndarray] = {}
@@ -86,22 +88,37 @@ def render_frame_preview(config_obj: SynthCalConfig, frame_id: int) -> dict[str,
         )
         rig_T_tcp_cam[cam_cfg.name] = np.asarray(cam_cfg.T_tcp_cam, dtype=np.float64)
 
+    reference_cam = cfg.rig.cameras[0].name
     vis_by_cam: dict[str, bool] | None = None
-    if cfg.scenario is None:
-        T_base_tcp = np.eye(4, dtype=np.float64)
-    else:
-        reference_cam = cfg.rig.cameras[0].name
-        T_base_tcp, vis = sample_valid_T_base_tcp(
+    if cfg.target_sampling is not None:
+        T_world_target, vis = sample_valid_T_tcp_target(
             global_seed=cfg.seed,
             frame_id=frame_id,
-            scenario=cfg.scenario,
+            sampling=cfg.target_sampling,
             cameras=camera_models,
             rig_extrinsics=rig_T_tcp_cam,
             target=target,
-            T_world_target=T_world_target,
             reference_camera=reference_cam,
         )
+        T_base_tcp = np.eye(4, dtype=np.float64)
         vis_by_cam = vis
+    else:
+        assert T_world_target_static is not None
+        T_world_target = T_world_target_static
+        if cfg.scenario is None:
+            T_base_tcp = np.eye(4, dtype=np.float64)
+        else:
+            T_base_tcp, vis = sample_valid_T_base_tcp(
+                global_seed=cfg.seed,
+                frame_id=frame_id,
+                scenario=cfg.scenario,
+                cameras=camera_models,
+                rig_extrinsics=rig_T_tcp_cam,
+                target=target,
+                T_world_target=T_world_target,
+                reference_camera=reference_cam,
+            )
+            vis_by_cam = vis
 
     laser_enabled = cfg.laser is not None and cfg.laser.enabled
     laser_plane_tcp = None
@@ -112,6 +129,7 @@ def render_frame_preview(config_obj: SynthCalConfig, frame_id: int) -> dict[str,
     out: dict[str, Any] = {
         "frame_index": frame_id,
         "T_base_tcp": T_base_tcp,
+        "T_world_target": T_world_target,
         "cameras": {},
     }
     if vis_by_cam is not None:

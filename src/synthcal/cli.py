@@ -51,7 +51,7 @@ def _cmd_preview(
     from synthcal.render.chessboard import render_chessboard_image
     from synthcal.render.gt import project_corners_px
     from synthcal.render.stripe import render_stripe_image
-    from synthcal.scenario.sampling import sample_valid_T_base_tcp
+    from synthcal.scenario.sampling import sample_valid_T_base_tcp, sample_valid_T_tcp_target
     from synthcal.targets.chessboard import ChessboardTarget
 
     cfg = load_config(config_path)
@@ -78,12 +78,14 @@ def _cmd_preview(
     )
     corners_xyz = target.corners_xyz()
 
-    if cfg.scene is not None:
-        T_world_target = np.asarray(cfg.scene.T_world_target, dtype=np.float64)
+    if cfg.target_sampling is not None:
+        T_world_target_static = None
+    elif cfg.scene is not None:
+        T_world_target_static = np.asarray(cfg.scene.T_world_target, dtype=np.float64)
     else:
         width_mm, height_mm = target.bounds()
-        T_world_target = np.eye(4, dtype=np.float64)
-        T_world_target[:3, 3] = np.array(
+        T_world_target_static = np.eye(4, dtype=np.float64)
+        T_world_target_static[:3, 3] = np.array(
             [-width_mm / 2.0, -height_mm / 2.0, 1000.0], dtype=np.float64
         )
 
@@ -97,23 +99,39 @@ def _cmd_preview(
         )
         rig_T_tcp_cam[c.name] = np.asarray(c.T_tcp_cam, dtype=np.float64)
 
+    reference_cam = cfg.rig.cameras[0].name
     vis_by_cam: dict[str, bool] = {}
-    if cfg.scenario is None:
-        T_base_tcp = np.eye(4, dtype=np.float64)
-    else:
-        reference_cam = cfg.rig.cameras[0].name
-        T_base_tcp, vis_by_cam = sample_valid_T_base_tcp(
+    if cfg.target_sampling is not None:
+        T_world_target, vis_by_cam = sample_valid_T_tcp_target(
             global_seed=cfg.seed,
             frame_id=frame_index,
-            scenario=cfg.scenario,
+            sampling=cfg.target_sampling,
             cameras=cameras,
             rig_extrinsics=rig_T_tcp_cam,
             target=target,
-            T_world_target=T_world_target,
             reference_camera=reference_cam,
         )
+        T_base_tcp = np.eye(4, dtype=np.float64)
         vis_str = ", ".join(f"{k}={int(v)}" for k, v in sorted(vis_by_cam.items()))
-        logging.info("scenario visibility: %s", vis_str)
+        logging.info("target_sampling visibility: %s", vis_str)
+    else:
+        assert T_world_target_static is not None
+        T_world_target = T_world_target_static
+        if cfg.scenario is None:
+            T_base_tcp = np.eye(4, dtype=np.float64)
+        else:
+            T_base_tcp, vis_by_cam = sample_valid_T_base_tcp(
+                global_seed=cfg.seed,
+                frame_id=frame_index,
+                scenario=cfg.scenario,
+                cameras=cameras,
+                rig_extrinsics=rig_T_tcp_cam,
+                target=target,
+                T_world_target=T_world_target,
+                reference_camera=reference_cam,
+            )
+            vis_str = ", ".join(f"{k}={int(v)}" for k, v in sorted(vis_by_cam.items()))
+            logging.info("scenario visibility: %s", vis_str)
 
     import matplotlib.pyplot as plt
 

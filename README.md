@@ -38,7 +38,7 @@ synthcal generate config.yaml out_dataset/
 ## Scope
 
 This repository focuses on:
-- Generating datasets of **static robot poses** for an **eye-in-hand multi-camera rig**.
+- Generating datasets for an **eye-in-hand multi-camera rig** (optionally with a laser plane).
 - For each frame and camera, producing paired outputs from the **same pose**:
   1) `target.png`: chessboard under normal illumination
   2) `stripe.png`: black background with only a laser stripe (when laser is enabled)
@@ -73,7 +73,8 @@ Undistortion is implemented as a simple fixed-point iteration starting from `(xu
 The dataset layout is described in `manifest.yaml` (schema v1). Outputs include:
 - `config.yaml` (the normalized config used to generate)
 - `manifest.yaml` (stable schema v1; also includes `version: 1`)
-- per-frame `T_base_tcp.npy` (identity for all frames unless `scenario` pose sampling is enabled)
+- per-frame `T_base_tcp.npy` (pose of TCP in world/base frame)
+- per-frame `T_world_target.npy` (pose of target in world/base frame)
 - per-frame/per-camera `*_target.png` + `*_corners_*.npy`
 - when laser is enabled: per-frame/per-camera `*_stripe.png` + `*_stripe_centerline_*.npy`
 - placeholder rig/camera YAML files (`rig/`)
@@ -98,6 +99,12 @@ Optional `scenario` pose sampling can generate a different `T_base_tcp` per fram
 in-view constraints (all corners inside the image with a margin). Presets `easy|medium|hard` provide
 reasonable default ranges; all randomness is derived from the global seed.
 
+## Target sampling
+
+Optional `target_sampling` can generate a different `T_world_target` per frame while enforcing the
+same in-view constraints. This is useful when you want a fixed rig (`T_base_tcp = I`) and a moving
+target.
+
 ## Laser
 
 Laser output is optional. When enabled, synthcal models the laser as a single infinite plane in the
@@ -110,6 +117,7 @@ stripe image and empty centerline arrays for that (frame, camera).
 - `seed` is the single global seed recorded in `config.yaml` and `manifest.yaml`.
 - Noise/effects use deterministic per-output RNG streams derived from `(seed, frame_index, camera_name, modality)`.
 - Scenario pose sampling uses a deterministic per-frame stream derived from `(seed, frame_index, "__scenario__", "pose")`.
+- Target pose sampling uses a deterministic per-frame stream derived from `(seed, frame_index, "__target__", "pose")`.
 
 ## Public API
 
@@ -133,8 +141,10 @@ Preview options:
 
 ## Coordinate conventions
 
-- Frames (v0): `world == base` (eye-in-hand only).
-- `T_tcp_cam` maps TCP-frame points into the camera frame.
+- Frames (v0): `world == base`.
+- `T_base_tcp` maps TCP-frame points into the world/base frame.
+- `T_tcp_cam` maps camera-frame points into the TCP frame.
+- `T_world_target` maps target-frame points into the world/base frame.
 - `T_cam_target` maps target-frame points into the camera frame: `X_cam = T_cam_target @ [X_target, 1]`.
 - The chessboard target lies in plane `Z=0` in the target frame, with outer corner at `(0,0,0)`.
 - Inner corners are ordered row-major (rows first, then cols), matching OpenCV’s convention.

@@ -4,7 +4,10 @@ units:
   length: mm
 dataset:
   name: minimal_no_laser
-  num_frames: 1
+  num_frames: 3
+target_sampling:
+  preset: easy
+  num_frames: 3
 rig:
   cameras:
     - name: cam00
@@ -28,4 +31,3 @@ effects:
   noise_sigma: 0.0
   clamp_min: 0.0
   clamp_max: 255.0
-

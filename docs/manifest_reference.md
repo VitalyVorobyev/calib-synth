@@ -15,5 +15,5 @@ Top-level keys:
 - `paths` (object): key dataset paths (`config_yaml`, `manifest_yaml`, `rig_yaml`, `cameras_dir`, `frames_dir`).
 - `cameras` (list): per-camera metadata (`name`, `intrinsics_yaml`, `image_size_px`).
 - `layout` (object): filename patterns for per-frame/per-camera outputs.
+  - Includes per-frame poses: `T_base_tcp_npy` and `T_world_target_npy`.
 - `laser` (object, optional): present only when laser outputs were generated.
-

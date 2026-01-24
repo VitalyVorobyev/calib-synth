@@ -186,3 +186,89 @@ def sample_valid_T_base_tcp(
         "Try increasing max_attempts_per_frame, reducing tilt/offset, increasing distance, "
         "reducing margin_px, or lowering the required number of visible cameras."
     )
+
+
+def sample_valid_T_tcp_target(
+    *,
+    global_seed: int,
+    frame_id: int,
+    sampling: ScenarioConfig,
+    cameras: dict[str, PinholeCamera],
+    rig_extrinsics: dict[str, Any],
+    target: ChessboardTarget,
+    reference_camera: str,
+) -> tuple[np.ndarray, dict[str, bool]]:
+    """Sample a `T_tcp_target` pose that satisfies the in-view constraints.
+
+    This is the "move target" counterpart to `sample_valid_T_base_tcp`.
+
+    The sampling distribution is defined in terms of the *reference camera* pose around the
+    target, using the same parameterization as `ScenarioConfig`. Internally, it samples a
+    camera pose `T_target_cam` in the target frame and then inverts it to obtain
+    `T_cam_target`. The sampled target pose in the TCP frame is then derived via the known
+    rig extrinsic `T_tcp_cam`:
+
+        T_tcp_target = T_tcp_cam_ref @ T_cam_target
+
+    The TCP frame is treated as the world/base frame (i.e., `T_base_tcp = I`) when checking
+    visibility.
+    """
+
+    rng = derive_rng(global_seed, frame_id, "__target__", "pose")
+
+    in_view = sampling.in_view
+    if in_view.require_all_cameras:
+        min_visible = len(cameras)
+    else:
+        min_visible = int(in_view.min_cameras_visible)
+        if min_visible <= 0:
+            raise ValueError("sampling.in_view.min_cameras_visible must be > 0")
+        if min_visible > len(cameras):
+            raise ValueError("sampling.in_view.min_cameras_visible cannot exceed number of cameras")
+
+    T_tcp_cam_ref = np.asarray(rig_extrinsics[reference_camera], dtype=np.float64)
+    if T_tcp_cam_ref.shape != (4, 4):
+        raise ValueError(
+            f"T_tcp_cam for reference_camera {reference_camera} must be 4x4, "
+            f"got {T_tcp_cam_ref.shape}"
+        )
+
+    T_base_tcp = np.eye(4, dtype=np.float64)
+    last_vis: dict[str, bool] | None = None
+    for _attempt in range(int(sampling.max_attempts_per_frame)):
+        # Sample a camera pose around the target and invert it to obtain `T_cam_target`.
+        #
+        # NOTE: With `T_world_target = I` and `T_tcp_cam_ref = I`, `sample_T_base_tcp` returns:
+        #   T_world_tcp = T_world_cam = T_target_cam
+        T_target_cam = sample_T_base_tcp(
+            rng,
+            target=target,
+            T_world_target=np.eye(4, dtype=np.float64),
+            T_tcp_cam_ref=np.eye(4, dtype=np.float64),
+            scenario=sampling,
+        )
+        T_cam_target = invert_se3(T_target_cam)
+        T_tcp_target = T_tcp_cam_ref @ T_cam_target
+
+        vis = check_frame_visibility(
+            cameras,
+            rig_extrinsics,
+            target,
+            T_tcp_target,
+            T_base_tcp,
+            margin_px=in_view.margin_px,
+        )
+        last_vis = vis
+        if sum(bool(v) for v in vis.values()) >= min_visible:
+            return T_tcp_target, vis
+
+    vis_str = "(no visibility results)"
+    if last_vis is not None:
+        vis_str = ", ".join(f"{k}={int(v)}" for k, v in sorted(last_vis.items()))
+    raise ValueError(
+        "Failed to sample a valid target pose for frame "
+        f"{frame_id} after {sampling.max_attempts_per_frame} attempts. "
+        f"Last visibility: {vis_str}. "
+        "Try increasing max_attempts_per_frame, reducing tilt/offset, increasing distance, "
+        "reducing margin_px, or lowering the required number of visible cameras."
+    )

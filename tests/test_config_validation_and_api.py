@@ -152,6 +152,24 @@ def test_api_generate_dataset_end_to_end_with_laser(tmp_path: Path) -> None:
     assert (frame_dir / "cam00_stripe_centerline_visible.npy").is_file()
 
 
+def test_api_generate_dataset_target_sampling_varies_pose(tmp_path: Path) -> None:
+    cfg = _minimal_config_dict(with_laser=False)
+    cfg["dataset"]["num_frames"] = 3
+    cfg["target_sampling"] = {"preset": "easy", "num_frames": 3}
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    generate_dataset(cfg_path, out_dir)
+
+    T0 = np.load(out_dir / "frames" / "frame_000000" / "T_world_target.npy")
+    T1 = np.load(out_dir / "frames" / "frame_000001" / "T_world_target.npy")
+    assert T0.shape == (4, 4)
+    assert T1.shape == (4, 4)
+    assert not np.allclose(T0, T1)
+
+
 def test_api_render_frame_preview_returns_arrays(tmp_path: Path) -> None:
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
@@ -162,6 +180,7 @@ def test_api_render_frame_preview_returns_arrays(tmp_path: Path) -> None:
     out = render_frame_preview(cfg, 0)
     assert out["frame_index"] == 0
     assert out["T_base_tcp"].shape == (4, 4)
+    assert out["T_world_target"].shape == (4, 4)
 
     cams = out["cameras"]
     assert "cam00" in cams

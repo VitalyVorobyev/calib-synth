@@ -368,7 +368,7 @@ def _range_from_optional(
     return RangeConfig(min=min_v, max=max_v)
 
 
-def _scenario_preset_defaults(name: str) -> dict[str, Any]:
+def _pose_sampler_preset_defaults(name: str, *, label: str) -> dict[str, Any]:
     preset = name.strip().lower()
     if preset == "easy":
         return {
@@ -394,25 +394,25 @@ def _scenario_preset_defaults(name: str) -> dict[str, Any]:
             "in_view": {"margin_px": 10, "require_all_cameras": False, "min_cameras_visible": 1},
             "max_attempts_per_frame": 800,
         }
-    raise ConfigError(f"Unknown scenario.preset {name!r}; expected one of: easy, medium, hard")
+    raise ConfigError(f"Unknown {label}.preset {name!r}; expected one of: easy, medium, hard")
 
 
-def _scenario_from_optional(data: Any) -> ScenarioConfig | None:
+def _pose_sampler_from_optional(data: Any, *, label: str) -> ScenarioConfig | None:
     if data is None:
         return None
-    data = _require_mapping(data, label="scenario")
+    data = _require_mapping(data, label=label)
 
     preset = data.get("preset", None)
     preset_defaults: dict[str, Any] = {}
     if isinstance(preset, str) and preset.strip():
-        preset_defaults = _scenario_preset_defaults(preset)
+        preset_defaults = _pose_sampler_preset_defaults(preset, label=label)
 
     num_frames_raw = data.get("num_frames", preset_defaults.get("num_frames", None))
     num_frames = None
     if num_frames_raw is not None:
-        num_frames = _require_int(num_frames_raw, label="scenario.num_frames")
+        num_frames = _require_int(num_frames_raw, label=f"{label}.num_frames")
         if num_frames <= 0:
-            raise ConfigError("scenario.num_frames must be > 0")
+            raise ConfigError(f"{label}.num_frames must be > 0")
 
     default_distance = preset_defaults.get("distance_mm", {"min": 400.0, "max": 1200.0})
     default_tilt = preset_defaults.get("tilt_deg", {"min": 0.0, "max": 45.0})
@@ -422,67 +422,67 @@ def _scenario_from_optional(data: Any) -> ScenarioConfig | None:
 
     distance_mm = _range_from_optional(
         data.get("distance_mm"),
-        label="scenario.distance_mm",
+        label=f"{label}.distance_mm",
         default_min=float(default_distance.get("min", 400.0)),
         default_max=float(default_distance.get("max", 1200.0)),
     )
     if distance_mm.min <= 0.0:
-        raise ConfigError("scenario.distance_mm.min must be > 0")
+        raise ConfigError(f"{label}.distance_mm.min must be > 0")
     tilt_deg = _range_from_optional(
         data.get("tilt_deg"),
-        label="scenario.tilt_deg",
+        label=f"{label}.tilt_deg",
         default_min=float(default_tilt.get("min", 0.0)),
         default_max=float(default_tilt.get("max", 45.0)),
     )
     if tilt_deg.min < 0.0:
-        raise ConfigError("scenario.tilt_deg.min must be >= 0")
+        raise ConfigError(f"{label}.tilt_deg.min must be >= 0")
     if tilt_deg.max > 89.0:
-        raise ConfigError("scenario.tilt_deg.max must be <= 89")
+        raise ConfigError(f"{label}.tilt_deg.max must be <= 89")
     yaw_deg = _range_from_optional(
         data.get("yaw_deg"),
-        label="scenario.yaw_deg",
+        label=f"{label}.yaw_deg",
         default_min=float(default_yaw.get("min", -180.0)),
         default_max=float(default_yaw.get("max", 180.0)),
     )
     roll_deg = _range_from_optional(
         data.get("roll_deg"),
-        label="scenario.roll_deg",
+        label=f"{label}.roll_deg",
         default_min=float(default_roll.get("min", -180.0)),
         default_max=float(default_roll.get("max", 180.0)),
     )
     xy_offset_frac = _range_from_optional(
         data.get("xy_offset_frac"),
-        label="scenario.xy_offset_frac",
+        label=f"{label}.xy_offset_frac",
         default_min=float(default_xy.get("min", 0.0)),
         default_max=float(default_xy.get("max", 0.0)),
     )
 
     max_attempts = _require_int(
         data.get("max_attempts_per_frame", preset_defaults.get("max_attempts_per_frame", 500)),
-        label="scenario.max_attempts_per_frame",
+        label=f"{label}.max_attempts_per_frame",
     )
     if max_attempts <= 0:
-        raise ConfigError("scenario.max_attempts_per_frame must be > 0")
+        raise ConfigError(f"{label}.max_attempts_per_frame must be > 0")
 
     default_in_view = preset_defaults.get("in_view", {})
     in_view_raw = data.get("in_view", {})
-    in_view_map = _require_mapping(in_view_raw, label="scenario.in_view")
+    in_view_map = _require_mapping(in_view_raw, label=f"{label}.in_view")
     margin_px = _require_int(
         in_view_map.get("margin_px", default_in_view.get("margin_px", 20)),
-        label="scenario.in_view.margin_px",
+        label=f"{label}.in_view.margin_px",
     )
     if margin_px < 0:
-        raise ConfigError("scenario.in_view.margin_px must be >= 0")
+        raise ConfigError(f"{label}.in_view.margin_px must be >= 0")
     require_all_cameras = _require_bool(
         in_view_map.get("require_all_cameras", default_in_view.get("require_all_cameras", True)),
-        label="scenario.in_view.require_all_cameras",
+        label=f"{label}.in_view.require_all_cameras",
     )
     min_cameras_visible = _require_int(
         in_view_map.get("min_cameras_visible", default_in_view.get("min_cameras_visible", 1)),
-        label="scenario.in_view.min_cameras_visible",
+        label=f"{label}.in_view.min_cameras_visible",
     )
     if min_cameras_visible <= 0:
-        raise ConfigError("scenario.in_view.min_cameras_visible must be > 0")
+        raise ConfigError(f"{label}.in_view.min_cameras_visible must be > 0")
 
     in_view = InViewConfig(
         margin_px=margin_px,
@@ -502,6 +502,10 @@ def _scenario_from_optional(data: Any) -> ScenarioConfig | None:
         max_attempts_per_frame=max_attempts,
         preset=preset_out,
     )
+
+
+def _scenario_from_optional(data: Any) -> ScenarioConfig | None:
+    return _pose_sampler_from_optional(data, label="scenario")
 
 
 @dataclass(frozen=True)
@@ -543,6 +547,7 @@ class SynthCalConfig:
     laser: LaserConfig | None
     scene: SceneConfig | None
     scenario: ScenarioConfig | None
+    target_sampling: ScenarioConfig | None
 
     @classmethod
     def example(cls) -> SynthCalConfig:
@@ -570,8 +575,6 @@ class SynthCalConfig:
         )
 
         chessboard = ChessboardConfig(inner_corners=(9, 6), square_size_mm=25.0)
-        width_mm = (chessboard.inner_corners[0] + 1) * chessboard.square_size_mm
-        height_mm = (chessboard.inner_corners[1] + 1) * chessboard.square_size_mm
 
         return cls(
             config_version=1,
@@ -582,15 +585,19 @@ class SynthCalConfig:
             chessboard=chessboard,
             effects=EffectsConfig(),
             laser=None,
-            scene=SceneConfig(
-                T_world_target=(
-                    (1.0, 0.0, 0.0, -width_mm / 2.0),
-                    (0.0, 1.0, 0.0, -height_mm / 2.0),
-                    (0.0, 0.0, 1.0, 1000.0),
-                    (0.0, 0.0, 0.0, 1.0),
-                )
-            ),
+            scene=None,
             scenario=None,
+            target_sampling=ScenarioConfig(
+                num_frames=None,
+                distance_mm=RangeConfig(min=800.0, max=1200.0),
+                tilt_deg=RangeConfig(min=0.0, max=20.0),
+                yaw_deg=RangeConfig(min=-180.0, max=180.0),
+                roll_deg=RangeConfig(min=-180.0, max=180.0),
+                xy_offset_frac=RangeConfig(min=-0.05, max=0.05),
+                in_view=InViewConfig(margin_px=20, require_all_cameras=True, min_cameras_visible=1),
+                max_attempts_per_frame=200,
+                preset="easy",
+            ),
         )
 
     @classmethod
@@ -630,12 +637,21 @@ class SynthCalConfig:
         chessboard = ChessboardConfig.from_dict(data.get("chessboard"))
         effects = _effects_from_optional(data.get("effects"))
         scenario = _scenario_from_optional(data.get("scenario"))
+        target_sampling = _pose_sampler_from_optional(
+            data.get("target_sampling"), label="target_sampling"
+        )
         laser = LaserConfig.from_optional(data.get("laser"))
         if laser is not None and laser.enabled is False:
             laser = None
         scene = SceneConfig.from_optional(data.get("scene"))
+        if scenario is not None and target_sampling is not None:
+            raise ConfigError("scenario and target_sampling are mutually exclusive; pick one")
+        if target_sampling is not None and scene is not None:
+            raise ConfigError("scene and target_sampling are mutually exclusive; pick one")
         if scenario is not None and scenario.num_frames is not None:
             dataset = DatasetConfig(name=dataset.name, num_frames=scenario.num_frames)
+        if target_sampling is not None and target_sampling.num_frames is not None:
+            dataset = DatasetConfig(name=dataset.name, num_frames=target_sampling.num_frames)
         return cls(
             config_version=config_version,
             seed=seed,
@@ -647,6 +663,7 @@ class SynthCalConfig:
             laser=laser,
             scene=scene,
             scenario=scenario,
+            target_sampling=target_sampling,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -661,6 +678,8 @@ class SynthCalConfig:
         }
         if self.scenario is not None:
             data["scenario"] = self.scenario.to_dict()
+        if self.target_sampling is not None:
+            data["target_sampling"] = self.target_sampling.to_dict()
         if self.laser is not None and self.laser.enabled:
             data["laser"] = self.laser.to_dict()
         if self.scene is not None:

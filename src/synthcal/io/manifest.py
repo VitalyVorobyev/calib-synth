@@ -184,6 +184,8 @@ class ManifestLayout:
     target_image: str
     corners_px_npy: str
     corners_visible_npy: str
+    T_base_tcp_npy: str | None = None
+    T_world_target_npy: str | None = None
     stripe_image: str | None = None
     stripe_centerline_px_npy: str | None = None
     stripe_centerline_visible_npy: str | None = None
@@ -196,6 +198,8 @@ class ManifestLayout:
         return cls(
             frame_dir=frame_dir,
             camera_dir=camera_dir,
+            T_base_tcp_npy=f"{base}/T_base_tcp.npy",
+            T_world_target_npy=f"{base}/T_world_target.npy",
             target_image=f"{base}/{{camera_name}}_target.png",
             corners_px_npy=f"{base}/{{camera_name}}_corners_px.npy",
             corners_visible_npy=f"{base}/{{camera_name}}_corners_visible.npy",
@@ -225,6 +229,18 @@ class ManifestLayout:
                 raise ManifestError(f"layout.{key} must be a non-empty string")
             values[key] = value
 
+        T_base_tcp_npy = data.get("T_base_tcp_npy")
+        if T_base_tcp_npy is not None and (
+            not isinstance(T_base_tcp_npy, str) or not T_base_tcp_npy
+        ):
+            raise ManifestError("layout.T_base_tcp_npy must be a non-empty string when present")
+
+        T_world_target_npy = data.get("T_world_target_npy")
+        if T_world_target_npy is not None and (
+            not isinstance(T_world_target_npy, str) or not T_world_target_npy
+        ):
+            raise ManifestError("layout.T_world_target_npy must be a non-empty string when present")
+
         stripe_image = data.get("stripe_image")
         if stripe_image is not None and (not isinstance(stripe_image, str) or not stripe_image):
             raise ManifestError("layout.stripe_image must be a non-empty string when present")
@@ -247,6 +263,8 @@ class ManifestLayout:
 
         return cls(
             **values,  # type: ignore[arg-type]
+            T_base_tcp_npy=T_base_tcp_npy,
+            T_world_target_npy=T_world_target_npy,
             stripe_image=stripe_image,
             stripe_centerline_px_npy=stripe_centerline,
             stripe_centerline_visible_npy=stripe_visible,
@@ -256,10 +274,16 @@ class ManifestLayout:
         data: dict[str, Any] = {
             "frame_dir": self.frame_dir,
             "camera_dir": self.camera_dir,
+            "T_base_tcp_npy": self.T_base_tcp_npy,
+            "T_world_target_npy": self.T_world_target_npy,
             "target_image": self.target_image,
             "corners_px_npy": self.corners_px_npy,
             "corners_visible_npy": self.corners_visible_npy,
         }
+        if self.T_base_tcp_npy is None:
+            data.pop("T_base_tcp_npy")
+        if self.T_world_target_npy is None:
+            data.pop("T_world_target_npy")
         if self.stripe_image is not None:
             data["stripe_image"] = self.stripe_image
         if self.stripe_centerline_px_npy is not None:

@@ -46,6 +46,8 @@ def test_generate_creates_structure_and_manifest_paths(tmp_path: Path) -> None:
 
     manifest = load_manifest(out_dir / "manifest.yaml")
     assert manifest.seed == cfg.seed
+    assert manifest.layout.T_base_tcp_npy is not None
+    assert manifest.layout.T_world_target_npy is not None
 
     for rel in [
         manifest.paths.config_yaml,
@@ -63,6 +65,7 @@ def test_generate_creates_structure_and_manifest_paths(tmp_path: Path) -> None:
     assert (out_dir / "frames" / "frame_000000").is_dir()
     assert (out_dir / "frames" / f"frame_{cfg.dataset.num_frames - 1:06d}").is_dir()
     assert (out_dir / "frames" / "frame_000000" / "T_base_tcp.npy").is_file()
+    assert (out_dir / "frames" / "frame_000000" / "T_world_target.npy").is_file()
     for cam in cfg.rig.cameras:
         assert (out_dir / "frames" / "frame_000000" / f"{cam.name}_target.png").is_file()
         assert (out_dir / "frames" / "frame_000000" / f"{cam.name}_corners_px.npy").is_file()

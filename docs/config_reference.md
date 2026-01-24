@@ -14,7 +14,7 @@ Top-level keys:
     - `image_size_px` (`[W, H]` ints)
     - `K` (3x3 floats): OpenCV-style intrinsics
     - `dist` (5 floats): `[k1, k2, k3, p1, p2]`
-    - `T_tcp_cam` (4x4 floats, optional): TCP→camera extrinsic, defaults to identity.
+    - `T_tcp_cam` (4x4 floats, optional): camera→TCP extrinsic (maps camera-frame points into the TCP frame), defaults to identity.
 - `chessboard` (object):
   - `inner_corners` (`[cols, rows]` ints, both >= 2)
   - `square_size_mm` (float > 0)
@@ -44,4 +44,7 @@ Top-level keys:
     - `min_cameras_visible` (int > 0, default `1`)
   - `max_attempts_per_frame` (int > 0, default depends on preset)
 - `scene` (object, optional):
-  - `T_world_target` (4x4 floats): world/base → target pose (mm)
+  - `T_world_target` (4x4 floats): target→world/base pose (mm)
+- `target_sampling` (object, optional): enables per-frame target pose sampling with in-view constraints
+  - Uses the same schema as `scenario` (presets `easy|medium|hard`, ranges, `in_view`, etc.)
+  - Mutually exclusive with `scene` and `scenario`

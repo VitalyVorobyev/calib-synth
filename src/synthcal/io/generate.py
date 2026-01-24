@@ -38,7 +38,7 @@ from synthcal.laser import (
 from synthcal.render.chessboard import render_chessboard_image
 from synthcal.render.gt import project_corners_px
 from synthcal.render.stripe import render_stripe_image
-from synthcal.scenario.sampling import sample_valid_T_base_tcp
+from synthcal.scenario.sampling import sample_valid_T_base_tcp, sample_valid_T_tcp_target
 from synthcal.targets.chessboard import ChessboardTarget
 
 
@@ -122,10 +122,12 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
     )
     corners_xyz = target.corners_xyz()
 
-    if cfg.scene is not None:
-        T_world_target = _mat44(cfg.scene.T_world_target)
-    else:
-        T_world_target = _default_T_world_target(target)
+    T_world_target_static: np.ndarray | None = None
+    if cfg.target_sampling is None:
+        if cfg.scene is not None:
+            T_world_target_static = _mat44(cfg.scene.T_world_target)
+        else:
+            T_world_target_static = _default_T_world_target(target)
 
     frames_dir = out_dir / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
@@ -148,21 +150,37 @@ def generate_dataset(cfg: SynthCalConfig, out_dir: str | Path) -> None:
     for frame_index in range(cfg.dataset.num_frames):
         frame_dir = frames_dir / f"frame_{frame_index:06d}"
         frame_dir.mkdir(parents=True, exist_ok=True)
-        if cfg.scenario is None:
-            T_base_tcp = np.eye(4, dtype=np.float64)
-        else:
+        if cfg.target_sampling is not None:
             reference_cam = cfg.rig.cameras[0].name
-            T_base_tcp, _vis = sample_valid_T_base_tcp(
+            T_world_target, _vis = sample_valid_T_tcp_target(
                 global_seed=cfg.seed,
                 frame_id=frame_index,
-                scenario=cfg.scenario,
+                sampling=cfg.target_sampling,
                 cameras=camera_models,
                 rig_extrinsics=rig_T_tcp_cam,
                 target=target,
-                T_world_target=T_world_target,
                 reference_camera=reference_cam,
             )
+            T_base_tcp = np.eye(4, dtype=np.float64)
+        else:
+            assert T_world_target_static is not None
+            T_world_target = T_world_target_static
+            if cfg.scenario is None:
+                T_base_tcp = np.eye(4, dtype=np.float64)
+            else:
+                reference_cam = cfg.rig.cameras[0].name
+                T_base_tcp, _vis = sample_valid_T_base_tcp(
+                    global_seed=cfg.seed,
+                    frame_id=frame_index,
+                    scenario=cfg.scenario,
+                    cameras=camera_models,
+                    rig_extrinsics=rig_T_tcp_cam,
+                    target=target,
+                    T_world_target=T_world_target,
+                    reference_camera=reference_cam,
+                )
         np.save(frame_dir / "T_base_tcp.npy", T_base_tcp)
+        np.save(frame_dir / "T_world_target.npy", T_world_target)
 
         for cam_cfg in cfg.rig.cameras:
             cam = camera_models[cam_cfg.name]
